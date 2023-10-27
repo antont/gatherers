@@ -33,7 +33,7 @@ fn setup(
     for x in (-full_x..full_x).step_by(50) {
         let sprite = SpriteBundle {
             sprite: Sprite {
-                color: Color::rgb(0.25, 0.25, 0.75),
+                color: Color::rgb(0.55, 0.7, 0.2),
                 custom_size: Some(tile_size),
                 ..default()
             },
