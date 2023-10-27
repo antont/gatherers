@@ -9,7 +9,7 @@ fn main() {
         .run();
 }
 
-#[derive(Component)]
+#[derive(Component, Clone)]
 enum Direction {
     Up,
     Down,
@@ -19,18 +19,35 @@ fn setup(
     mut commands: Commands,
 ) {
     commands.spawn(Camera2dBundle::default());
-    commands.spawn((
-        SpriteBundle {
+
+    let tile_size = Vec2::new(20.0, 20.0);
+    let map_size = Vec2::splat(600.0);
+
+    //let half_x = (map_size.x / 2.0) as i32;
+    let full_x = map_size.x as i32;
+
+    // Builds and spawns the sprites
+    let mut sprites = vec![];
+
+    let mut next_dir = Direction::Down;
+    for x in (-full_x..full_x).step_by(50) {
+        let sprite = SpriteBundle {
             sprite: Sprite {
                 color: Color::rgb(0.25, 0.25, 0.75),
-                custom_size: Some(Vec2::new(50.0, 100.0)),
+                custom_size: Some(tile_size),
                 ..default()
             },
-            transform: Transform::from_translation(Vec3::new(-50., 0., 0.)),
+            transform: Transform::from_translation(Vec3::new(x as f32, 100., 0.)),
             ..default()
-        },
-        Direction::Up
-    ));
+        };
+        sprites.push((sprite, next_dir.clone()));
+        match next_dir {
+            Direction::Down => next_dir = Direction::Up,
+            Direction::Up => next_dir = Direction::Down,
+        }
+    }
+    println!("Sprites to spawn: {}", sprites.len());
+    commands.spawn_batch(sprites)
 }
 
 /// The sprite is animated by changing its translation depending on the time that has passed since
