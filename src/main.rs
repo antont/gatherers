@@ -1,3 +1,4 @@
+use rand::Rng;
 use derive_more::From;
 use bevy::prelude::*;
 
@@ -29,6 +30,7 @@ fn setup(
     let full_x = map_size.x as i32;
 
     // Builds and spawns the sprites
+    let mut rng = rand::thread_rng();
     let mut sprites = vec![];
 
     for x in (-full_x..full_x).step_by(50) {
@@ -41,7 +43,8 @@ fn setup(
             transform: Transform::from_translation(Vec3::new(x as f32, 100., 0.)),
             ..default()
         };
-        let velocity = Vec2::new(0.0, -100.0); //rng.gen_range(-w..w), rng.gen_range(-h..h));
+        let angle = rng.gen_range(0.0..2.0 * std::f32::consts::PI);
+        let velocity = Vec2::new(angle.cos(), angle.sin()) * 100.0;
         sprites.push((
             sprite, 
             Velocity::from(velocity),
