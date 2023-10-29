@@ -1,10 +1,14 @@
 use derive_more::From;
 use bevy::prelude::*;
 
+mod boundary;
+use boundary::{BoundaryPlugin, BoundaryWrap, Bounding}; //BoundaryRemoval
+
 fn main() {
     println!("Hello, world!");
     App::new()
         .add_plugins(DefaultPlugins)
+        .add_plugins(BoundaryPlugin)
         .add_systems(Startup, setup)
         .add_systems(Update, gatherer_movement)
         .run();
@@ -12,7 +16,6 @@ fn main() {
 
 #[derive(Debug, Component, From)] //, Default, Deref, DerefMut, From, Resource)]
 pub struct Velocity(Vec2);
-
 
 fn setup(
     mut commands: Commands,
@@ -39,7 +42,12 @@ fn setup(
             ..default()
         };
         let velocity = Vec2::new(0.0, -100.0); //rng.gen_range(-w..w), rng.gen_range(-h..h));
-        sprites.push((sprite, Velocity::from(velocity)));
+        sprites.push((
+            sprite, 
+            Velocity::from(velocity),
+            Bounding::from_radius(2.0),
+            BoundaryWrap
+        ));
     }
     println!("Sprites to spawn: {}", sprites.len());
     commands.spawn_batch(sprites)
