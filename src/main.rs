@@ -1,6 +1,6 @@
 use rand::Rng;
 use derive_more::From;
-use bevy::{prelude::*, window::PrimaryWindow, utils::HashSet};
+use bevy::{prelude::*, window::PrimaryWindow, utils::HashSet, log};
 
 mod boundary;
 mod collision;
@@ -70,7 +70,7 @@ fn setup(
     }
 
     let mut foods = vec![];
-    for _ in 0..30 {
+    for _ in 0..80 {
         let x = rng.gen_range(-half_x..half_x);
         let y = rng.gen_range(-half_y..half_y);
 
@@ -113,7 +113,8 @@ fn ant_hits_system(
     //mut rng: Local<Random>,
     mut ant_hits: EventReader<HitEvent<Food, Ant>>,
     mut commands: Commands,
-    query: Query<&Transform, With<Ant>>
+    ant_query: Query<&Transform, With<Ant>>,
+    food_query: Query<&Transform, With<Food>>
 ) {
     let mut remove = HashSet::with_capacity(ant_hits.len());
 
@@ -127,7 +128,7 @@ fn ant_hits_system(
         }*/
 
         //println!("Hit 1: {}", ant.index());
-        if let Ok(transform) = query.get(ant) {
+        if let Ok(transform) = ant_query.get(ant) {
             println!("Hit 2: {}", ant.index());
             if !remove.contains(&food) {
                 remove.insert(food);
@@ -141,7 +142,11 @@ fn ant_hits_system(
     }
 
     for food in remove {
-        commands.entity(food).despawn();
+        if let Ok(transform) = food_query.get(food) {
+            commands.entity(food).despawn();
+        } else {
+            log::warn!("[ant_hits_system]: Tried to remove a food entity that does not exist: {}", food.index());
+        }
     }
 }
 
