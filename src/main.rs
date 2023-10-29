@@ -1,22 +1,33 @@
 use rand::Rng;
 use derive_more::From;
-use bevy::{prelude::*, window::PrimaryWindow};
+use bevy::{prelude::*, window::PrimaryWindow, utils::HashSet};
 
 mod boundary;
+mod collision;
 use boundary::{BoundaryPlugin, BoundaryWrap, Bounding}; //BoundaryRemoval
+use collision::{Collidable, CollisionPlugin, CollisionSystemLabel, HitEvent};
 
 fn main() {
     println!("Hello, world!");
     App::new()
         .add_plugins(DefaultPlugins)
         .add_plugins(BoundaryPlugin)
+        .add_plugins(CollisionPlugin::<Food, Ant>::new())
         .add_systems(Startup, setup)
         .add_systems(Update, gatherer_movement)
+        .add_systems(Update, ant_hits_system)        
         .run();
 }
 
 #[derive(Debug, Component, From)] //, Default, Deref, DerefMut, From, Resource)]
 pub struct Velocity(Vec2);
+
+#[derive(Debug, Component, Default)]
+struct Ant;
+
+#[derive(Debug, Component, Default)]
+struct Food;
+
 
 fn setup(
     mut commands: Commands,
@@ -49,9 +60,11 @@ fn setup(
         let angle = rng.gen_range(0.0..2.0 * std::f32::consts::PI);
         let velocity = Vec2::new(angle.cos(), angle.sin()) * 1000.0;
         ants.push((
+            Ant,
             ant, 
             Velocity::from(velocity),
-            Bounding::from_radius(2.0),
+            Bounding::from_radius(10.0),
+            Collidable,
             BoundaryWrap
         ));
     }
@@ -70,7 +83,12 @@ fn setup(
             transform: Transform::from_translation(Vec3::new(x as f32, y as f32, 1.)),
             ..default()
         };
-        foods.push(food);
+        foods.push((
+            Food,
+            food,
+            Collidable,
+            Bounding::from_radius(5.0),
+        ));
     }
 
     println!("Ants to spawn: {}", ants.len());
@@ -90,3 +108,40 @@ fn gatherer_movement(time: Res<Time>, mut sprite_position: Query<(&Velocity, &mu
         transform.translation.y += scaled_velocity.y;
     }
 }
+
+fn ant_hits_system(
+    //mut rng: Local<Random>,
+    mut ant_hits: EventReader<HitEvent<Food, Ant>>,
+    mut commands: Commands,
+    query: Query<&Transform, With<Ant>>
+) {
+    let mut remove = HashSet::with_capacity(ant_hits.len());
+
+    for hit in ant_hits.iter() {
+        let ant = hit.hitter();
+        let food = hit.hittable();
+
+        /* somehow does not help?
+        if remove.contains(&food) {
+            continue;
+        }*/
+
+        //println!("Hit 1: {}", ant.index());
+        if let Ok(transform) = query.get(ant) {
+            println!("Hit 2: {}", ant.index());
+            if !remove.contains(&food) {
+                remove.insert(food);
+            }
+        }
+            /*for n in 0..12 * 6 {
+                let angle = 2.0 * PI / 12.0 * (n % 12) as f32 + rng.gen_range(0.0..2.0 * PI / 12.0);
+                let direction = Vec3::new(angle.cos(), angle.sin(), 0.0);
+                let position = direction * rng.gen_range(1.0..20.0) + transform.translation;
+            }*/
+    }
+
+    for food in remove {
+        commands.entity(food).despawn();
+    }
+}
+
