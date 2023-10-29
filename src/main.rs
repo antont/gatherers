@@ -5,7 +5,7 @@ use bevy::{prelude::*, window::PrimaryWindow, utils::HashSet, log};
 mod boundary;
 mod collision;
 use boundary::{BoundaryPlugin, BoundaryWrap, Bounding}; //BoundaryRemoval
-use collision::{Collidable, CollisionPlugin, CollisionSystemLabel, HitEvent};
+use collision::{Collidable, CollisionPlugin, HitEvent}; //CollisionSystemLabel
 
 fn main() {
     println!("Hello, world!");
@@ -28,6 +28,8 @@ struct Ant;
 #[derive(Debug, Component, Default)]
 struct Food;
 
+#[derive(Debug, Component, Default)]
+struct Carried;
 
 fn setup(
     mut commands: Commands,
@@ -113,39 +115,36 @@ fn ant_hits_system(
     //mut rng: Local<Random>,
     mut ant_hits: EventReader<HitEvent<Food, Ant>>,
     mut commands: Commands,
-    ant_query: Query<&Transform, With<Ant>>,
-    food_query: Query<&Transform, With<Food>>
+    mut ant_query: Query<(&mut Velocity, Option<&Children>), With<Ant>>,
+    mut food_query: Query<&mut Transform, With<Food>>
 ) {
-    let mut remove = HashSet::with_capacity(ant_hits.len());
+    let mut rng = rand::thread_rng();
 
     for hit in ant_hits.iter() {
         let ant = hit.hitter();
         let food = hit.hittable();
 
-        /* somehow does not help?
-        if remove.contains(&food) {
-            continue;
-        }*/
-
         //println!("Hit 1: {}", ant.index());
-        if let Ok(transform) = ant_query.get(ant) {
+        if let Ok((mut velocity, carrying)) = ant_query.get_mut(ant) {
+            if let Some(carrying) = carrying {
+                if !carrying.is_empty() {
+                    continue;
+                }
+            }            
             println!("Hit 2: {}", ant.index());
-            if !remove.contains(&food) {
-                remove.insert(food);
-            }
-        }
-            /*for n in 0..12 * 6 {
-                let angle = 2.0 * PI / 12.0 * (n % 12) as f32 + rng.gen_range(0.0..2.0 * PI / 12.0);
-                let direction = Vec3::new(angle.cos(), angle.sin(), 0.0);
-                let position = direction * rng.gen_range(1.0..20.0) + transform.translation;
-            }*/
-    }
+            commands.entity(ant).push_children(&[food]);
+            commands.entity(food).insert(Carried);
+            commands.entity(food).remove::<Collidable>();
 
-    for food in remove {
-        if let Ok(transform) = food_query.get(food) {
-            commands.entity(food).despawn();
-        } else {
-            log::warn!("[ant_hits_system]: Tried to remove a food entity that does not exist: {}", food.index());
+            let mut foodpos = food_query.get_mut(food).unwrap();
+            foodpos.translation.x = 0.0;
+            foodpos.translation.y = 0.0;
+            foodpos.translation.z = 3.0; //over the ant
+
+            //copy-paste from setup. TODO: DRY
+            let angle = rng.gen_range(0.0..2.0 * std::f32::consts::PI);
+            let new_velocity = Vec2::new(angle.cos(), angle.sin()) * 1000.0;
+            *velocity = Velocity(new_velocity);
         }
     }
 }
