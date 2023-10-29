@@ -33,11 +33,12 @@ fn boundary_wrap_system(
     mut query: Query<(&mut Transform, &Bounding), With<BoundaryWrap>>,
 ) {
     if let Ok(window) = primary_window.get_single() {
+        let half_width = window.width() / 2.0;
+
         for (mut transform, radius) in query.iter_mut() {
             let x = transform.translation.x;
             let y = transform.translation.y;
 
-            let half_width = window.width() / 2.0;
             if x + radius.0 * 2.0 < -half_width {
                 transform.translation.x = half_width + radius.0 * 2.0;
             } else if x - radius.0 * 2.0 > half_width {

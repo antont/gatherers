@@ -44,7 +44,7 @@ fn setup(
             ..default()
         };
         let angle = rng.gen_range(0.0..2.0 * std::f32::consts::PI);
-        let velocity = Vec2::new(angle.cos(), angle.sin()) * 100.0;
+        let velocity = Vec2::new(angle.cos(), angle.sin()) * 1000.0;
         sprites.push((
             sprite, 
             Velocity::from(velocity),
