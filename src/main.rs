@@ -1,3 +1,4 @@
+use derive_more::From;
 use bevy::prelude::*;
 
 fn main() {
@@ -5,15 +6,13 @@ fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .add_systems(Startup, setup)
-        .add_systems(Update, sprite_movement)
+        .add_systems(Update, gatherer_movement)
         .run();
 }
 
-#[derive(Component, Clone)]
-enum Direction {
-    Up,
-    Down,
-}
+#[derive(Debug, Component, From)] //, Default, Deref, DerefMut, From, Resource)]
+pub struct Velocity(Vec2);
+
 
 fn setup(
     mut commands: Commands,
@@ -29,7 +28,6 @@ fn setup(
     // Builds and spawns the sprites
     let mut sprites = vec![];
 
-    let mut next_dir = Direction::Down;
     for x in (-full_x..full_x).step_by(50) {
         let sprite = SpriteBundle {
             sprite: Sprite {
@@ -40,11 +38,8 @@ fn setup(
             transform: Transform::from_translation(Vec3::new(x as f32, 100., 0.)),
             ..default()
         };
-        sprites.push((sprite, next_dir.clone()));
-        match next_dir {
-            Direction::Down => next_dir = Direction::Up,
-            Direction::Up => next_dir = Direction::Down,
-        }
+        let velocity = Vec2::new(0.0, -100.0); //rng.gen_range(-w..w), rng.gen_range(-h..h));
+        sprites.push((sprite, Velocity::from(velocity)));
     }
     println!("Sprites to spawn: {}", sprites.len());
     commands.spawn_batch(sprites)
@@ -52,17 +47,12 @@ fn setup(
 
 /// The sprite is animated by changing its translation depending on the time that has passed since
 /// the last frame.
-fn sprite_movement(time: Res<Time>, mut sprite_position: Query<(&mut Direction, &mut Transform)>) {
-    for (mut sprite, mut transform) in &mut sprite_position {
-        match *sprite {
-            Direction::Up => transform.translation.y += 150. * time.delta_seconds(),
-            Direction::Down => transform.translation.y -= 150. * time.delta_seconds(),
-        }
-
-        if transform.translation.y > 200. {
-            *sprite = Direction::Down;
-        } else if transform.translation.y < -200. {
-            *sprite = Direction::Up;
-        }
+fn gatherer_movement(time: Res<Time>, mut sprite_position: Query<(&Velocity, &mut Transform)>) {
+    //let sprite_position_collection: Vec<_> = sprite_position.iter_mut().collect();
+    //print!("[gatherer_movement] Number of sprites: {}", sprite_position_collection.len());
+    for (velocity, mut transform) in &mut sprite_position {
+        let scaled_velocity = velocity.0 * time.delta_seconds();
+        transform.translation.x += scaled_velocity.x;
+        transform.translation.y += scaled_velocity.y;
     }
 }
