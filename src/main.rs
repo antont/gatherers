@@ -1,6 +1,6 @@
 use rand::Rng;
 use derive_more::From;
-use bevy::prelude::*;
+use bevy::{prelude::*, window::PrimaryWindow};
 
 mod boundary;
 use boundary::{BoundaryPlugin, BoundaryWrap, Bounding}; //BoundaryRemoval
@@ -20,40 +20,63 @@ pub struct Velocity(Vec2);
 
 fn setup(
     mut commands: Commands,
+    primary_window: Query<&Window, With<PrimaryWindow>>
 ) {
     commands.spawn(Camera2dBundle::default());
+    let window = primary_window.get_single().unwrap();
 
-    let tile_size = Vec2::new(20.0, 20.0);
-    let map_size = Vec2::splat(600.0);
+    let map_size = Vec2::new(window.width(), window.height()); //splat(600.0);
+    let ant_size = Vec2::new(20.0, 20.0);
+    let food_size = Vec2::new(10.0, 10.0);
 
-    //let half_x = (map_size.x / 2.0) as i32;
-    let full_x = map_size.x as i32;
-
+    let half_x = (map_size.x / 2.0) as i32;
+    let half_y = (map_size.y / 2.0) as i32;
+    
     // Builds and spawns the sprites
     let mut rng = rand::thread_rng();
-    let mut sprites = vec![];
+    let mut ants = vec![];
 
-    for x in (-full_x..full_x).step_by(50) {
-        let sprite = SpriteBundle {
+    for x in (-half_x..half_x).step_by(50) {
+        let ant = SpriteBundle {
             sprite: Sprite {
                 color: Color::rgb(0.55, 0.7, 0.2),
-                custom_size: Some(tile_size),
+                custom_size: Some(ant_size),
                 ..default()
             },
-            transform: Transform::from_translation(Vec3::new(x as f32, 100., 0.)),
+            transform: Transform::from_translation(Vec3::new(x as f32, 100., 2.)),
             ..default()
         };
         let angle = rng.gen_range(0.0..2.0 * std::f32::consts::PI);
         let velocity = Vec2::new(angle.cos(), angle.sin()) * 1000.0;
-        sprites.push((
-            sprite, 
+        ants.push((
+            ant, 
             Velocity::from(velocity),
             Bounding::from_radius(2.0),
             BoundaryWrap
         ));
     }
-    println!("Sprites to spawn: {}", sprites.len());
-    commands.spawn_batch(sprites)
+
+    let mut foods = vec![];
+    for _ in 0..30 {
+        let x = rng.gen_range(-half_x..half_x);
+        let y = rng.gen_range(-half_y..half_y);
+
+        let food = SpriteBundle {
+            sprite: Sprite {
+                color: Color::rgb(0.8, 0.4, 0.3),
+                custom_size: Some(food_size),
+                ..default()
+            },
+            transform: Transform::from_translation(Vec3::new(x as f32, y as f32, 1.)),
+            ..default()
+        };
+        foods.push(food);
+    }
+
+    println!("Ants to spawn: {}", ants.len());
+    commands.spawn_batch(ants);
+    commands.spawn_batch(foods);
+
 }
 
 /// The sprite is animated by changing its translation depending on the time that has passed since
