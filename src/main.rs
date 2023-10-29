@@ -1,6 +1,6 @@
 use rand::Rng;
 use derive_more::From;
-use bevy::{prelude::*, window::PrimaryWindow, utils::HashSet, log};
+use bevy::{prelude::*, window::PrimaryWindow, log};
 
 mod boundary;
 mod collision;
@@ -16,6 +16,7 @@ fn main() {
         .add_systems(Startup, setup)
         .add_systems(Update, gatherer_movement)
         .add_systems(Update, ant_hits_system)        
+        .add_systems(PostUpdate, cooldown_system)
         .run();
 }
 
@@ -28,8 +29,10 @@ struct Ant;
 #[derive(Debug, Component, Default)]
 struct Food;
 
-#[derive(Debug, Component, Default)]
-struct Carried;
+#[derive(Debug, Component)]
+struct Cooldown {
+    timer: Timer
+}
 
 fn setup(
     mut commands: Commands,
@@ -89,7 +92,7 @@ fn setup(
             Food,
             food,
             Collidable,
-            Bounding::from_radius(5.0),
+            Bounding::from_radius(10.0),
         ));
     }
 
@@ -115,7 +118,7 @@ fn ant_hits_system(
     //mut rng: Local<Random>,
     mut ant_hits: EventReader<HitEvent<Food, Ant>>,
     mut commands: Commands,
-    mut ant_query: Query<(&mut Velocity, Option<&Children>), With<Ant>>,
+    mut ant_query: Query<(&mut Velocity, Option<&Children>), (With<Ant>, Without<Cooldown>)>,
     mut food_query: Query<&mut Transform, With<Food>>
 ) {
     let mut rng = rand::thread_rng();
@@ -126,25 +129,47 @@ fn ant_hits_system(
 
         //println!("Hit 1: {}", ant.index());
         if let Ok((mut velocity, carrying)) = ant_query.get_mut(ant) {
+            //println!("[ant_hits_system] Hit: {}", ant.index());
             if let Some(carrying) = carrying {
                 if !carrying.is_empty() {
-                    continue;
+                    let carried_food = carrying[0];
+                    commands.entity(carried_food).remove_parent_in_place();
+                    commands.entity(carried_food).insert(Collidable); //'Carried' component not needed, Collidable is same but negative
+                    //println!("[ant_hits_system] Dropped: {}", carried_food.index());
+                    commands.entity(ant).insert(Cooldown { 
+                        timer: Timer::from_seconds(0.5, TimerMode::Once) 
+                    });
+                } else {
+                    log::warn!("[ant_hits_system] There is Some(carrying) but carrying.is_empty - how come?")
                 }
-            }            
-            println!("Hit 2: {}", ant.index());
-            commands.entity(ant).push_children(&[food]);
-            commands.entity(food).insert(Carried);
-            commands.entity(food).remove::<Collidable>();
+            } else {        
+                commands.entity(ant).push_children(&[food]);
+                commands.entity(food).remove::<Collidable>(); //'Carried' component not needed, Collidable is same but negative
 
-            let mut foodpos = food_query.get_mut(food).unwrap();
-            foodpos.translation.x = 0.0;
-            foodpos.translation.y = 0.0;
-            foodpos.translation.z = 3.0; //over the ant
+                let mut foodpos = food_query.get_mut(food).unwrap();
+                foodpos.translation.x = 0.0;
+                foodpos.translation.y = 0.0;
+                foodpos.translation.z = 3.0; //over the ant
+                //println!("[ant_hits_system] Picked up: {}", food.index());
 
-            //copy-paste from setup. TODO: DRY
-            let angle = rng.gen_range(0.0..2.0 * std::f32::consts::PI);
-            let new_velocity = Vec2::new(angle.cos(), angle.sin()) * 1000.0;
-            *velocity = Velocity(new_velocity);
+                //copy-paste from setup. TODO: DRY
+                let angle = rng.gen_range(0.0..2.0 * std::f32::consts::PI);
+                let new_velocity = Vec2::new(angle.cos(), angle.sin()) * 1000.0;
+                *velocity = Velocity(new_velocity);
+            }
+        }
+    }
+}
+
+fn cooldown_system(
+    time: Res<Time>,
+    mut query: Query<(Entity, &mut Cooldown)>,
+    mut commands: Commands
+) {
+    for (entity, mut cooldown) in query.iter_mut() {
+        cooldown.timer.tick(time.delta());
+        if cooldown.timer.finished() {
+            commands.entity(entity).remove::<Cooldown>();
         }
     }
 }
