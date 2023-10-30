@@ -1,6 +1,10 @@
 use rand::Rng;
 use derive_more::From;
-use bevy::{prelude::*, window::PrimaryWindow, log};
+use bevy::{
+    prelude::*,
+    window::{PrimaryWindow, PresentMode},
+    log
+};
 
 mod boundary;
 mod collision;
@@ -15,7 +19,8 @@ fn main() {
             primary_window: Some(Window {
                 title: "an-gatherers".to_string(),
                 //resolution: (800.0, 600.0).into(),
-                
+                present_mode: PresentMode::AutoVsync,
+                                
                 ..Default::default()
             }),
             ..Default::default()
