@@ -1,6 +1,8 @@
 # gatherers
 Simple Gatherers simulation in Rust, using Bevy. Port of the Breve Gatherers original.
 
+[![Video](https://img.youtube.com/vi/n7ywYXcFS1M/0.jpg)](https://youtu.be/n7ywYXcFS1M)
+
 - Live on the web: https://an.org/gatherers/
 
 The white boxes, 'ants', follow most simple rules, and *don't know anything about each other*:
