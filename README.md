@@ -1,9 +1,13 @@
 # gatherers
 Simple Gatherers simulation in Rust, using Bevy. Port of the Breve Gatherers original.
 
+## video 
 [![Video](https://img.youtube.com/vi/n7ywYXcFS1M/0.jpg)](https://youtu.be/n7ywYXcFS1M)
 
-- Live on the web: https://an.org/gatherers/
+## Live on the Web
+- https://an.org/gatherers/
+
+# What happens here?
 
 The white boxes, 'ants', follow most simple rules, and *don't know anything about each other*:
 - go straight in random direction
