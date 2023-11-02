@@ -20,7 +20,6 @@ fn main() {
                 title: "an-gatherers".to_string(),
                 //resolution: (800.0, 600.0).into(),
                 present_mode: PresentMode::AutoVsync,
-                                
                 ..Default::default()
             }),
             ..Default::default()
@@ -151,7 +150,7 @@ fn ant_hits_system(
                     commands.entity(carried_food).insert(Collidable); //'Carried' component not needed, Collidable is same but negative
                     //println!("[ant_hits_system] Dropped: {}", carried_food.index());
                     commands.entity(ant).insert(Cooldown { 
-                        timer: Timer::from_seconds(0.5, TimerMode::Once) 
+                        timer: Timer::from_seconds(0.1, TimerMode::Once)
                     });
                 } else {
                     log::warn!("[ant_hits_system] There is Some(carrying) but carrying.is_empty - how come?")
@@ -166,8 +165,12 @@ fn ant_hits_system(
                 foodpos.translation.z = 3.0; //over the ant
                 //println!("[ant_hits_system] Picked up: {}", food.index());
 
-                //copy-paste from setup. TODO: DRY
-                let angle = rng.gen_range(0.0..2.0 * std::f32::consts::PI);
+                // Get the current direction of the ant
+                let current_angle = velocity.0.angle_between(Vec2::new(1.0, 0.0));
+
+                // Turn back 180 degrees and add a random angle from -90 to 90 degrees
+                let angle = current_angle + std::f32::consts::PI + rng.gen_range(-std::f32::consts::FRAC_PI_2..std::f32::consts::FRAC_PI_2);
+
                 let new_velocity = Vec2::new(angle.cos(), angle.sin()) * 1000.0;
                 *velocity = Velocity(new_velocity);
             }
