@@ -1,1 +1,1 @@
-gsutil cp -r dist/* gs://an.org/movers-bevy/
+gsutil cp -r dist/* gs://an.org/gatherers/

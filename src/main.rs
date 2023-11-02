@@ -112,7 +112,6 @@ fn setup(
     println!("Ants to spawn: {}", ants.len());
     commands.spawn_batch(ants);
     commands.spawn_batch(foods);
-
 }
 
 /// The sprite is animated by changing its translation depending on the time that has passed since
