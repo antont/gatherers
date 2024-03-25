@@ -135,7 +135,7 @@ fn ant_hits_system(
 ) {
     let mut rng = rand::thread_rng();
 
-    for hit in ant_hits.iter() {
+    for hit in ant_hits.read() {
         let ant = hit.hitter();
         let food = hit.hittable();
 
