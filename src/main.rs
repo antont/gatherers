@@ -14,7 +14,7 @@ use collision::{Collidable, CollisionPlugin, HitEvent}; //CollisionSystemLabel
 fn main() {
     println!("Hello, world!");
     App::new()
-        .insert_resource(ClearColor(Color::rgb(95./255., 151./255., 212./255.)))
+        .insert_resource(ClearColor(Color::srgb(95./255., 151./255., 212./255.)))
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: "an-gatherers".to_string(),
@@ -68,7 +68,7 @@ fn setup(
     for x in (-half_x..half_x).step_by(50) {
         let ant = SpriteBundle {
             sprite: Sprite {
-                color: Color::rgb(0.8, 0.8, 0.8),
+                color: Color::srgb(0.8, 0.8, 0.8),
                 custom_size: Some(ant_size),
                 ..default()
             },
@@ -94,7 +94,7 @@ fn setup(
 
         let food = SpriteBundle {
             sprite: Sprite {
-                color: Color::rgb(192./255., 2./255., 2./255.),
+                color: Color::srgb(192./255., 2./255., 2./255.),
                 custom_size: Some(food_size),
                 ..default()
             },
