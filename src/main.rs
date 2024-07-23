@@ -52,7 +52,13 @@ fn setup(
     primary_window: Query<&Window, With<PrimaryWindow>>
 ) {
     commands.spawn(Camera2dBundle::default());
-    let window = primary_window.get_single().unwrap();
+    let window = match primary_window.get_single() {
+        Ok(window) => window,
+        Err(e) => {
+            log::error!("Failed to get primary window: {:?}", e);
+            return;
+        }
+    };
 
     let map_size = Vec2::new(window.width(), window.height()); //splat(600.0);
     let ant_size = Vec2::new(20.0, 20.0);
@@ -158,7 +164,13 @@ fn ant_hits_system(
                 commands.entity(ant).push_children(&[food]);
                 commands.entity(food).remove::<Collidable>(); //'Carried' component not needed, Collidable is same but negative
 
-                let mut foodpos = food_query.get_mut(food).unwrap();
+                let mut foodpos = match food_query.get_mut(food) {
+                    Ok(transform) => transform,
+                    Err(e) => {
+                        log::error!("Failed to get food transform: {:?}", e);
+                        continue;
+                    }
+                };
                 foodpos.translation.x = 0.0;
                 foodpos.translation.y = 0.0;
                 foodpos.translation.z = 3.0; //over the ant
