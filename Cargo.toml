@@ -1,14 +1,14 @@
 [package]
 name = "an-gatherers"
-version = "0.1.2"
+version = "0.1.4"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-derive_more = "0.99.16"
-rand = "0.8.4"
-wasm-bindgen = "0.2.87"
+derive_more = "0.99"
+rand = "0.8"
+wasm-bindgen = "0.2"
 
 #[dependencies.web-sys]
 #version = "0.3"
@@ -34,7 +34,7 @@ wasm-bindgen = "0.2.87"
 #]
 
 [dependencies.bevy]
-version = "0.13.1"
+version = "0.14"
 default-features = false
 features = [
   "bevy_sprite",
