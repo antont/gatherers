@@ -93,7 +93,7 @@ fn update_hitters_spatial_index<Hitter: Component>(
 fn update_hittable_positions<Hittable: Component>(
     mut spatial_index: ResMut<SpatialIndex>,
     added_query: Query<(Entity, &Transform), (With<Hittable>, Added<Collidable>)>,
-    //mut removed: RemovedComponents<Collidable>
+    mut removed: RemovedComponents<Collidable>
 ) {
     // Update positions for newly dropped food
     for (entity, transform) in added_query.iter() {
@@ -101,7 +101,7 @@ fn update_hittable_positions<Hittable: Component>(
     }
 
     //Remove entries for newly picked up food
-    // for entity in removed.read() {
-    //     spatial_index.remove(entity);
-    // }
+    for entity in removed.read() {
+        spatial_index.remove(entity);
+    }
 }
