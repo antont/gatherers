@@ -1,10 +1,11 @@
-use rand::Rng;
-use derive_more::From;
 use bevy::{
+    diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin},
+    log,
     prelude::*,
-    window::{PrimaryWindow, PresentMode},
-    log
+    window::{PresentMode, PrimaryWindow},
 };
+use derive_more::From;
+use rand::Rng;
 
 mod boundary;
 mod collision;
@@ -14,21 +15,27 @@ use collision::{Collidable, CollisionPlugin, HitEvent}; //CollisionSystemLabel
 fn main() {
     println!("Hello, world!");
     App::new()
-        .insert_resource(ClearColor(Color::srgb(95./255., 151./255., 212./255.)))
+        .insert_resource(ClearColor(Color::srgb(
+            95. / 255.,
+            151. / 255.,
+            212. / 255.,
+        )))
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: "an-gatherers".to_string(),
                 //resolution: (800.0, 600.0).into(),
-                present_mode: PresentMode::AutoVsync,
+                present_mode: PresentMode::Immediate, //PresentMode::AutoVsync,
                 ..Default::default()
             }),
             ..Default::default()
         }))
         .add_plugins(BoundaryPlugin)
         .add_plugins(CollisionPlugin::<Food, Ant>::new())
+        .add_plugins(FrameTimeDiagnosticsPlugin)
+        .add_plugins(LogDiagnosticsPlugin::default())
         .add_systems(Startup, setup)
         .add_systems(Update, gatherer_movement)
-        .add_systems(Update, ant_hits_system)        
+        .add_systems(Update, ant_hits_system)
         .add_systems(PostUpdate, cooldown_system)
         .run();
 }
@@ -44,13 +51,10 @@ struct Food;
 
 #[derive(Debug, Component)]
 struct Cooldown {
-    timer: Timer
+    timer: Timer,
 }
 
-fn setup(
-    mut commands: Commands,
-    primary_window: Query<&Window, With<PrimaryWindow>>
-) {
+fn setup(mut commands: Commands, primary_window: Query<&Window, With<PrimaryWindow>>) {
     commands.spawn(Camera2dBundle::default());
     let window = match primary_window.get_single() {
         Ok(window) => window,
@@ -66,7 +70,7 @@ fn setup(
 
     let half_x = (map_size.x / 2.0) as i32;
     let half_y = (map_size.y / 2.0) as i32;
-    
+
     // Builds and spawns the sprites
     let mut rng = rand::thread_rng();
     let mut ants = vec![];
@@ -85,11 +89,11 @@ fn setup(
         let velocity = Vec2::new(angle.cos(), angle.sin()) * 1000.0;
         ants.push((
             Ant,
-            ant, 
+            ant,
             Velocity::from(velocity),
             Bounding::from_radius(10.0),
             Collidable,
-            BoundaryWrap
+            BoundaryWrap,
         ));
     }
 
@@ -100,19 +104,14 @@ fn setup(
 
         let food = SpriteBundle {
             sprite: Sprite {
-                color: Color::srgb(192./255., 2./255., 2./255.),
+                color: Color::srgb(192. / 255., 2. / 255., 2. / 255.),
                 custom_size: Some(food_size),
                 ..default()
             },
             transform: Transform::from_translation(Vec3::new(x as f32, y as f32, 1.)),
             ..default()
         };
-        foods.push((
-            Food,
-            food,
-            Collidable,
-            Bounding::from_radius(10.0),
-        ));
+        foods.push((Food, food, Collidable, Bounding::from_radius(10.0)));
     }
 
     println!("Ants to spawn: {}", ants.len());
@@ -137,7 +136,7 @@ fn ant_hits_system(
     mut ant_hits: EventReader<HitEvent<Food, Ant>>,
     mut commands: Commands,
     mut ant_query: Query<(&mut Velocity, Option<&Children>), (With<Ant>, Without<Cooldown>)>,
-    mut food_query: Query<&mut Transform, With<Food>>
+    mut food_query: Query<&mut Transform, With<Food>>,
 ) {
     let mut rng = rand::thread_rng();
 
@@ -153,14 +152,14 @@ fn ant_hits_system(
                     let carried_food = carrying[0];
                     commands.entity(carried_food).remove_parent_in_place();
                     commands.entity(carried_food).insert(Collidable); //'Carried' component not needed, Collidable is same but negative
-                    //println!("[ant_hits_system] Dropped: {}", carried_food.index());
-                    commands.entity(ant).insert(Cooldown { 
-                        timer: Timer::from_seconds(0.1, TimerMode::Once)
+                                                                      //println!("[ant_hits_system] Dropped: {}", carried_food.index());
+                    commands.entity(ant).insert(Cooldown {
+                        timer: Timer::from_seconds(0.1, TimerMode::Once),
                     });
                 } else {
                     log::warn!("[ant_hits_system] There is Some(carrying) but carrying.is_empty - how come?")
                 }
-            } else {        
+            } else {
                 commands.entity(ant).push_children(&[food]);
                 commands.entity(food).remove::<Collidable>(); //'Carried' component not needed, Collidable is same but negative
 
@@ -174,13 +173,15 @@ fn ant_hits_system(
                 foodpos.translation.x = 0.0;
                 foodpos.translation.y = 0.0;
                 foodpos.translation.z = 3.0; //over the ant
-                //println!("[ant_hits_system] Picked up: {}", food.index());
+                                             //println!("[ant_hits_system] Picked up: {}", food.index());
 
                 // Get the current direction of the ant
                 let current_angle = velocity.0.angle_between(Vec2::new(1.0, 0.0));
 
                 // Turn back 180 degrees and add a random angle from -90 to 90 degrees
-                let angle = current_angle + std::f32::consts::PI + rng.gen_range(-std::f32::consts::FRAC_PI_2..std::f32::consts::FRAC_PI_2);
+                let angle = current_angle
+                    + std::f32::consts::PI
+                    + rng.gen_range(-std::f32::consts::FRAC_PI_2..std::f32::consts::FRAC_PI_2);
 
                 let new_velocity = Vec2::new(angle.cos(), angle.sin()) * 1000.0;
                 *velocity = Velocity(new_velocity);
@@ -192,7 +193,7 @@ fn ant_hits_system(
 fn cooldown_system(
     time: Res<Time>,
     mut query: Query<(Entity, &mut Cooldown)>,
-    mut commands: Commands
+    mut commands: Commands,
 ) {
     for (entity, mut cooldown) in query.iter_mut() {
         cooldown.timer.tick(time.delta());
@@ -201,4 +202,3 @@ fn cooldown_system(
         }
     }
 }
-
