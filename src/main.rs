@@ -1,3 +1,7 @@
+mod boundary;
+mod collision;
+mod spatial_index;
+
 use bevy::{
     diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin},
     log,
@@ -7,8 +11,6 @@ use bevy::{
 use derive_more::From;
 use rand::Rng;
 
-mod boundary;
-mod collision;
 use boundary::{BoundaryPlugin, BoundaryWrap, Bounding}; //BoundaryRemoval
 use collision::{Collidable, CollisionPlugin, HitEvent}; //CollisionSystemLabel
 
@@ -86,7 +88,7 @@ fn setup(mut commands: Commands, primary_window: Query<&Window, With<PrimaryWind
             ..default()
         };
         let angle = rng.gen_range(0.0..2.0 * std::f32::consts::PI);
-        let velocity = Vec2::new(angle.cos(), angle.sin()) * 1000.0;
+        let velocity = Vec2::new(angle.cos(), angle.sin()) * 10000.0;
         ants.push((
             Ant,
             ant,
@@ -183,7 +185,7 @@ fn ant_hits_system(
                     + std::f32::consts::PI
                     + rng.gen_range(-std::f32::consts::FRAC_PI_2..std::f32::consts::FRAC_PI_2);
 
-                let new_velocity = Vec2::new(angle.cos(), angle.sin()) * 1000.0;
+                let new_velocity = Vec2::new(angle.cos(), angle.sin()) * 10000.0;
                 *velocity = Velocity(new_velocity);
             }
         }

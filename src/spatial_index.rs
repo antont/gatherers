@@ -7,7 +7,7 @@ pub struct SpatialIndex {
 }
 
 /// Cell size has to be bigger than any `TriggerMine::radius`
-const CELL_SIZE: f32 = 64.0;
+const CELL_SIZE: f32 = 16.0;
 
 impl SpatialIndex {
     // Lookup all entities within adjacent cells of our spatial index
@@ -33,5 +33,11 @@ impl SpatialIndex {
             (pos.y / CELL_SIZE).floor() as i32,
         );
         self.map.entry(tile).or_default().insert(entity);
+    }
+
+    pub fn remove(&mut self, entity: Entity) {
+        for (_, mines) in self.map.iter_mut() {
+            mines.remove(&entity);
+        }
     }
 }
