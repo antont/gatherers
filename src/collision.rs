@@ -64,6 +64,7 @@ fn collision_system<A: Component, B: Component>(
                 entities: (nearby_entity, hitter_entity),
                 _phantom: PhantomData,
             });
+            break; //NOTE: we only deal with the 1st one now without any additional checks
             //     }
             // }
         }

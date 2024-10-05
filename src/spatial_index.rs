@@ -7,7 +7,7 @@ pub struct SpatialIndex {
 }
 
 /// Cell size has to be bigger than any `TriggerMine::radius`
-const CELL_SIZE: f32 = 16.0;
+const CELL_SIZE: f32 = 20.0;
 
 impl SpatialIndex {
     // Lookup all entities within adjacent cells of our spatial index
