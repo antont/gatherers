@@ -21,7 +21,6 @@ impl<Hittable: Component, Hitter: Component> Plugin for CollisionPlugin<Hittable
             .add_event::<HitEvent<Hittable, Hitter>>()
             .add_systems(Startup, initialize_hittables::<Hittable>)
             .add_systems(Update, update_hittable_positions::<Hittable>)
-            .add_systems(Update, update_hitters_spatial_index::<Hitter>)
             .add_systems(Update, collision_system::<Hittable, Hitter>);
     }
 }
@@ -51,22 +50,22 @@ pub struct Collidable;
 fn collision_system<A: Component, B: Component>(
     mut hits: EventWriter<HitEvent<A, B>>,
     spatial_index: Res<SpatialIndex>,
-    hittables: Query<(Entity, &Transform, &Bounding), (With<Collidable>, With<A>)>,
+    //hittables: Query<(Entity, &Transform, &Bounding), (With<Collidable>, With<A>)>,
     hitters: Query<(Entity, &Transform, &Bounding), (With<Collidable>, With<B>)>,
 ) {
-    for (hitter_entity, hitter_transform, hitter_bounds) in hitters.iter() {
+    for (hitter_entity, hitter_transform, _hitter_bounds) in hitters.iter() {
         let nearby_entities = spatial_index.get_nearby(hitter_transform.translation.truncate());
         
         for &nearby_entity in nearby_entities.iter() {
-            if let Ok((hittable_entity, hittable_transform, hittable_bounds)) = hittables.get(nearby_entity) {
-                let distance = (hittable_transform.translation - hitter_transform.translation).length();
-                if distance < **hittable_bounds + **hitter_bounds {
-                    hits.send(HitEvent {
-                        entities: (hittable_entity, hitter_entity),
-                        _phantom: PhantomData,
-                    });
-                }
-            }
+            // if let Ok((hittable_entity, hittable_transform, hittable_bounds)) = hittables.get(nearby_entity) {
+            //     let distance = (hittable_transform.translation - hitter_transform.translation).length();
+            //     if distance < **hittable_bounds + **hitter_bounds {
+            hits.send(HitEvent {
+                entities: (nearby_entity, hitter_entity),
+                _phantom: PhantomData,
+            });
+            //     }
+            // }
         }
     }
 }
@@ -76,18 +75,19 @@ fn initialize_hittables<Hittable: Component>(
     query: Query<(Entity, &Transform), With<Hittable>>,
 ) {
     for (entity, transform) in query.iter() {
-        spatial_index.update_spatial_index(entity, transform.translation.truncate());
-    }
-}
-
-fn update_hitters_spatial_index<Hitter: Component>(
-    mut spatial_index: ResMut<SpatialIndex>,
-    query: Query<(Entity, &Transform), With<Hitter>>,
-) {
-    for (entity, transform) in query.iter() {
         spatial_index.update(entity, transform.translation.truncate());
     }
 }
+
+/* NOTE: we actually don't need the hitters there, they just get hittables nearby */
+// fn update_hitters_spatial_index<Hitter: Component>(
+//     mut spatial_index: ResMut<SpatialIndex>,
+//     query: Query<(Entity, &Transform), With<Hitter>>,
+// ) {
+//     for (entity, transform) in query.iter() {
+//         spatial_index.update(entity, transform.translation.truncate());
+//     }
+// }
 
 // This system updates hittables that have been dropped or picked up
 fn update_hittable_positions<Hittable: Component>(
