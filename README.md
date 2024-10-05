@@ -32,4 +32,5 @@ Made using the Bevy game engine for Rust, reusing the wrap-around system and oth
   * perhaps use https://github.com/SergiusIW/collider-rs or https://github.com/patrik-cihal/perfect-collisions
   * there'sa simple SpatialIndex in the Observers example, https://github.com/bevyengine/bevy/blob/latest/examples/ecs/observers.rs#L196
 - [ ] Add sounds to events, food pickup & drop
-  * would be cool to have these parametric so that the amount of food nearby affects the sound 
+  * would be cool to have these parametric so that the amount of food nearby affects the sound
+- Maybe add colours to the food to mark some info, like time since last pick-up, the direction from where it arrived to the current drop spot, what else? https://bevyengine.org/examples-webgpu/2d-rendering/mesh2d-vertex-color-texture/
