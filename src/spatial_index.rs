@@ -27,7 +27,7 @@ impl SpatialIndex {
         nearby
     }
 
-    pub fn update_spatial_index(&mut self, entity: Entity, pos: Vec2) {
+    pub fn update(&mut self, entity: Entity, pos: Vec2) {
         let tile = (
             (pos.x / CELL_SIZE).floor() as i32,
             (pos.y / CELL_SIZE).floor() as i32,

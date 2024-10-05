@@ -85,7 +85,7 @@ fn update_hitters_spatial_index<Hitter: Component>(
     query: Query<(Entity, &Transform), With<Hitter>>,
 ) {
     for (entity, transform) in query.iter() {
-        spatial_index.update_spatial_index(entity, transform.translation.truncate());
+        spatial_index.update(entity, transform.translation.truncate());
     }
 }
 
@@ -97,7 +97,7 @@ fn update_hittable_positions<Hittable: Component>(
 ) {
     // Update positions for newly dropped food
     for (entity, transform) in added_query.iter() {
-        spatial_index.update_spatial_index(entity, transform.translation.truncate());
+        spatial_index.update(entity, transform.translation.truncate());
     }
 
     //Remove entries for newly picked up food
