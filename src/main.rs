@@ -26,7 +26,7 @@ fn main() {
             primary_window: Some(Window {
                 title: "an-gatherers".to_string(),
                 //resolution: (800.0, 600.0).into(),
-                present_mode: PresentMode::Immediate, //PresentMode::AutoVsync,
+                present_mode: PresentMode::AutoVsync, //PresentMode::Immediate,
                 ..Default::default()
             }),
             ..Default::default()
