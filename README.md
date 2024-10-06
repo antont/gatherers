@@ -27,7 +27,7 @@ Made using the Bevy game engine for Rust, reusing the wrap-around system and oth
   * need to set the speed to a var & the pick-up cooldown to be calculated from the speed sensibly
 - [ ] Respond to windows size change in the browser, and make full browser window sized.
   * Works on the desktop already, just needs the browser hooks
-- [ ] Optimize and improve collision detection
+- [x] Optimize and improve collision detection
   * maybe using continuous collision detection which would be a nice fit with the linear movements here
   * perhaps use https://github.com/SergiusIW/collider-rs or https://github.com/patrik-cihal/perfect-collisions
   * there'sa simple SpatialIndex in the Observers example, https://github.com/bevyengine/bevy/blob/latest/examples/ecs/observers.rs#L196
