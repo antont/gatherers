@@ -1,3 +1,5 @@
+/* Extended from https://github.com/bevyengine/bevy/blob/latest/examples/ecs/observers.rs#L196 */
+
 use bevy::prelude::*;
 use std::collections::{HashMap, HashSet};
 
