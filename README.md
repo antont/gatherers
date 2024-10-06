@@ -28,9 +28,9 @@ Made using the Bevy game engine for Rust, reusing the wrap-around system and oth
 - [ ] Respond to windows size change in the browser, and make full browser window sized.
   * Works on the desktop already, just needs the browser hooks
 - [x] Optimize and improve collision detection
-  * maybe using continuous collision detection which would be a nice fit with the linear movements here
-  * perhaps use https://github.com/SergiusIW/collider-rs or https://github.com/patrik-cihal/perfect-collisions
-  * there'sa simple SpatialIndex in the Observers example, https://github.com/bevyengine/bevy/blob/latest/examples/ecs/observers.rs#L196
+  * (maybe using continuous collision detection which would be a nice fit with the linear movements here)
+  * (perhaps use https://github.com/SergiusIW/collider-rs or https://github.com/patrik-cihal/perfect-collisions )
+  * DONE: there'sa simple SpatialIndex in the Observers example, https://github.com/bevyengine/bevy/blob/latest/examples/ecs/observers.rs#L196
 - [ ] Add sounds to events, food pickup & drop
   * would be cool to have these parametric so that the amount of food nearby affects the sound
 - Maybe add colours to the food to mark some info, like time since last pick-up, the direction from where it arrived to the current drop spot, what else? https://bevyengine.org/examples-webgpu/2d-rendering/mesh2d-vertex-color-texture/
