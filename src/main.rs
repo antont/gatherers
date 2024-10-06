@@ -1,3 +1,7 @@
+mod boundary;
+mod collision;
+mod spatial_index;
+
 use bevy::{
     diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin},
     log,
@@ -7,8 +11,6 @@ use bevy::{
 use derive_more::From;
 use rand::Rng;
 
-mod boundary;
-mod collision;
 use boundary::{BoundaryPlugin, BoundaryWrap, Bounding}; //BoundaryRemoval
 use collision::{Collidable, CollisionPlugin, HitEvent}; //CollisionSystemLabel
 
