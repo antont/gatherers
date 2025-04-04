@@ -127,7 +127,7 @@ fn gatherer_movement(time: Res<Time>, mut sprite_position: Query<(&Velocity, &mu
     //let sprite_position_collection: Vec<_> = sprite_position.iter_mut().collect();
     //print!("[gatherer_movement] Number of sprites: {}", sprite_position_collection.len());
     for (velocity, mut transform) in &mut sprite_position {
-        let scaled_velocity = velocity.0 * time.delta_seconds();
+        let scaled_velocity = velocity.0 * time.delta_secs();
         transform.translation.x += scaled_velocity.x;
         transform.translation.y += scaled_velocity.y;
     }
@@ -162,8 +162,8 @@ fn ant_hits_system(
                     log::warn!("[ant_hits_system] There is Some(carrying) but carrying.is_empty - how come?")
                 }
             } else {
-                commands.entity(ant).push_children(&[food]);
-                commands.entity(food).remove::<Collidable>(); //'Carried' component not needed, Collidable is same but negative
+                commands.entity(ant).add_child(food);
+                commands.entity(food).remove::<Collidable>();
 
                 let mut foodpos = match food_query.get_mut(food) {
                     Ok(transform) => transform,
