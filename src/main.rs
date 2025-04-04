@@ -62,7 +62,7 @@ fn setup(
     ant_query: Query<&Ant>,
     food_query: Query<&Food>,
 ) {
-    commands.spawn(Camera2dBundle::default());
+    commands.spawn(Camera2d::default());
     let window = match primary_window.get_single() {
         Ok(window) => window,
         Err(e) => {
@@ -98,7 +98,7 @@ fn setup(
             Bounding::from_radius(10.0),
             Collidable,
             BoundaryWrap,
-            VisibilityBundle::default(),
+            Visibility::default(),
         ));
     }
 
@@ -117,7 +117,7 @@ fn setup(
             GlobalTransform::default(),
             Collidable,
             Bounding::from_radius(10.0),
-            VisibilityBundle::default(),
+            Visibility::default(),
         ));
     }
 
@@ -182,7 +182,7 @@ fn ant_hits_system(
                                              //println!("[ant_hits_system] Picked up: {}", food.index());
 
                 // Get the current direction of the ant
-                let current_angle = velocity.0.angle_between(Vec2::new(1.0, 0.0));
+                let current_angle = velocity.0.angle_to(Vec2::new(1.0, 0.0));
 
                 // Turn back 180 degrees and add a random angle from -90 to 90 degrees
                 let angle = current_angle
