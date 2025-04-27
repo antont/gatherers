@@ -56,8 +56,13 @@ struct Cooldown {
     timer: Timer,
 }
 
-fn setup(mut commands: Commands, primary_window: Query<&Window, With<PrimaryWindow>>) {
-    commands.spawn(Camera2dBundle::default());
+fn setup(
+    mut commands: Commands, 
+    primary_window: Query<&Window, With<PrimaryWindow>>,
+    ant_query: Query<&Ant>,
+    food_query: Query<&Food>,
+) {
+    commands.spawn(Camera2d::default());
     let window = match primary_window.get_single() {
         Ok(window) => window,
         Err(e) => {
@@ -75,50 +80,49 @@ fn setup(mut commands: Commands, primary_window: Query<&Window, With<PrimaryWind
 
     // Builds and spawns the sprites
     let mut rng = rand::thread_rng();
-    let mut ants = vec![];
 
     for x in (-half_x..half_x).step_by(50) {
-        let ant = SpriteBundle {
-            sprite: Sprite {
+        let angle = rng.gen_range(0.0..2.0 * std::f32::consts::PI);
+        let velocity = Vec2::new(angle.cos(), angle.sin()) * 1000.0;
+        
+        commands.spawn((
+            Ant,
+            Sprite {
                 color: Color::srgb(0.8, 0.8, 0.8),
                 custom_size: Some(ant_size),
                 ..default()
             },
-            transform: Transform::from_translation(Vec3::new(x as f32, 100., 2.)),
-            ..default()
-        };
-        let angle = rng.gen_range(0.0..2.0 * std::f32::consts::PI);
-        let velocity = Vec2::new(angle.cos(), angle.sin()) * 1000.0;
-        ants.push((
-            Ant,
-            ant,
+            Transform::from_translation(Vec3::new(x as f32, 100., 2.)),
+            GlobalTransform::default(),
             Velocity::from(velocity),
             Bounding::from_radius(10.0),
             Collidable,
             BoundaryWrap,
+            Visibility::default(),
         ));
     }
 
-    let mut foods = vec![];
     for _ in 0..80 {
         let x = rng.gen_range(-half_x..half_x);
         let y = rng.gen_range(-half_y..half_y);
 
-        let food = SpriteBundle {
-            sprite: Sprite {
+        commands.spawn((
+            Food,
+            Sprite {
                 color: Color::srgb(192. / 255., 2. / 255., 2. / 255.),
                 custom_size: Some(food_size),
                 ..default()
             },
-            transform: Transform::from_translation(Vec3::new(x as f32, y as f32, 1.)),
-            ..default()
-        };
-        foods.push((Food, food, Collidable, Bounding::from_radius(10.0)));
+            Transform::from_translation(Vec3::new(x as f32, y as f32, 1.)),
+            GlobalTransform::default(),
+            Collidable,
+            Bounding::from_radius(10.0),
+            Visibility::default(),
+        ));
     }
 
-    println!("Ants to spawn: {}", ants.len());
-    commands.spawn_batch(ants);
-    commands.spawn_batch(foods);
+    println!("Ants to spawn: {}", ant_query.iter().count());
+    println!("Foods to spawn: {}", food_query.iter().count());
 }
 
 /// The sprite is animated by changing its translation depending on the time that has passed since
@@ -127,7 +131,7 @@ fn gatherer_movement(time: Res<Time>, mut sprite_position: Query<(&Velocity, &mu
     //let sprite_position_collection: Vec<_> = sprite_position.iter_mut().collect();
     //print!("[gatherer_movement] Number of sprites: {}", sprite_position_collection.len());
     for (velocity, mut transform) in &mut sprite_position {
-        let scaled_velocity = velocity.0 * time.delta_seconds();
+        let scaled_velocity = velocity.0 * time.delta_secs();
         transform.translation.x += scaled_velocity.x;
         transform.translation.y += scaled_velocity.y;
     }
@@ -162,8 +166,8 @@ fn ant_hits_system(
                     log::warn!("[ant_hits_system] There is Some(carrying) but carrying.is_empty - how come?")
                 }
             } else {
-                commands.entity(ant).push_children(&[food]);
-                commands.entity(food).remove::<Collidable>(); //'Carried' component not needed, Collidable is same but negative
+                commands.entity(ant).add_child(food);
+                commands.entity(food).remove::<Collidable>();
 
                 let mut foodpos = match food_query.get_mut(food) {
                     Ok(transform) => transform,
@@ -178,7 +182,7 @@ fn ant_hits_system(
                                              //println!("[ant_hits_system] Picked up: {}", food.index());
 
                 // Get the current direction of the ant
-                let current_angle = velocity.0.angle_between(Vec2::new(1.0, 0.0));
+                let current_angle = velocity.0.angle_to(Vec2::new(1.0, 0.0));
 
                 // Turn back 180 degrees and add a random angle from -90 to 90 degrees
                 let angle = current_angle
