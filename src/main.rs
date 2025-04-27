@@ -36,9 +36,11 @@ fn main() {
         .add_plugins(FrameTimeDiagnosticsPlugin::default())
         .add_plugins(LogDiagnosticsPlugin::default())
         .add_systems(Startup, setup)
+        .add_systems(Startup, setup_window)
         .add_systems(Update, gatherer_movement)
         .add_systems(Update, ant_hits_system)
         .add_systems(PostUpdate, cooldown_system)
+        .add_systems(Update, handle_window_resize)
         .run();
 }
 
@@ -207,4 +209,16 @@ fn cooldown_system(
             commands.entity(entity).remove::<Cooldown>();
         }
     }
+}
+
+fn setup_window(mut windows: Query<&mut Window>) {
+    if let Ok(mut window) = windows.get_single_mut() {
+        window.resizable = true;
+        // Make the window fill the available space
+        window.fit_canvas_to_parent = true;
+    }
+}
+
+fn handle_window_resize(mut _windows: Query<&mut Window>) {
+    // Optional - add custom resize logic here if needed
 }
