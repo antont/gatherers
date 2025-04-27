@@ -9,6 +9,7 @@ edition = "2021"
 derive_more = "0.99"
 rand = "0.8"
 wasm-bindgen = "0.2"
+log = "0.4"
 
 #[dependencies.web-sys]
 #version = "0.3"
@@ -34,14 +35,15 @@ wasm-bindgen = "0.2"
 #]
 
 [dependencies.bevy]
-version = "0.15"
+version = "0.16"
 default-features = false
 features = [
   "bevy_sprite",
   "bevy_render",
   "bevy_core_pipeline",
   "bevy_winit",
-  "webgl2"
+  "webgl2",
+  "bevy_log"
 ]
 
 # Enable a small amount of optimization in debug mode

@@ -4,12 +4,12 @@ mod spatial_index;
 
 use bevy::{
     diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin},
-    log,
     prelude::*,
     window::{PresentMode, PrimaryWindow},
 };
 use derive_more::From;
 use rand::Rng;
+use log;
 
 use boundary::{BoundaryPlugin, BoundaryWrap, Bounding}; //BoundaryRemoval
 use collision::{Collidable, CollisionPlugin, HitEvent}; //CollisionSystemLabel
@@ -33,7 +33,7 @@ fn main() {
         }))
         .add_plugins(BoundaryPlugin)
         .add_plugins(CollisionPlugin::<Food, Ant>::new())
-        .add_plugins(FrameTimeDiagnosticsPlugin)
+        .add_plugins(FrameTimeDiagnosticsPlugin::default())
         .add_plugins(LogDiagnosticsPlugin::default())
         .add_systems(Startup, setup)
         .add_systems(Update, gatherer_movement)
@@ -163,7 +163,7 @@ fn ant_hits_system(
                         timer: Timer::from_seconds(0.1, TimerMode::Once),
                     });
                 } else {
-                    log::warn!("[ant_hits_system] There is Some(carrying) but carrying.is_empty - how come?")
+                    warn!("[ant_hits_system] There is Some(carrying) but carrying.is_empty - how come?");
                 }
             } else {
                 commands.entity(ant).add_child(food);
@@ -172,7 +172,7 @@ fn ant_hits_system(
                 let mut foodpos = match food_query.get_mut(food) {
                     Ok(transform) => transform,
                     Err(e) => {
-                        log::error!("Failed to get food transform: {:?}", e);
+                        error!("Failed to get food transform: {:?}", e);
                         continue;
                     }
                 };
