@@ -1,0 +1,247 @@
+# An Gatherers - Emergent Behavior Simulation
+
+```SudoLang
+// An Gatherers: A simulation demonstrating emergent collective behavior
+// Port of the classic Breve Gatherers demo, showing how simple local rules
+// create complex global patterns without explicit coordination.
+
+// === CORE CONCEPT ===
+// Simple agents (ants) follow basic rules:
+// 1. Move in straight lines
+// 2. Pick up food when encountered (if not carrying)
+// 3. Drop food when encountered (if already carrying)
+// 4. Turn around after food interactions
+// Result: Food naturally clusters into piles through emergent behavior
+
+// === SIMULATION PARAMETERS ===
+Config = {
+  world: {
+    width: 800,
+    height: 600,
+    wrapBoundaries: true
+  },
+  
+  agents: {
+    count: 16,  // spawned across width
+    size: 20,
+    speed: 100, // pixels per second
+    spawnY: 100,
+    color: "lightgray"
+  },
+  
+  resources: {
+    count: 80,
+    size: 10,
+    color: "darkred"
+  },
+  
+  behavior: {
+    pickupCooldown: 0.1, // seconds
+    turnAngleRange: 90   // degrees (±45°)
+  }
+}
+
+// === ENTITY DEFINITIONS ===
+Agent = {
+  position: Vec2,
+  velocity: Vec2,
+  carrying: Resource | null,
+  cooldown: number,
+  
+  // Core behavior: move forward continuously
+  move: (deltaTime) => {
+    position += velocity * deltaTime
+    
+    // Wrap around screen boundaries
+    if (position.x < -Config.world.width/2) position.x = Config.world.width/2
+    if (position.x > Config.world.width/2) position.x = -Config.world.width/2
+    if (position.y < -Config.world.height/2) position.y = Config.world.height/2
+    if (position.y > Config.world.height/2) position.y = -Config.world.height/2
+  },
+  
+  // Interaction logic: the heart of emergent behavior
+  interact: (resource) => {
+    if (cooldown > 0) return // Still in cooldown
+    
+    if (carrying == null) {
+      // Pick up resource
+      carrying = resource
+      resource.pickedUp = true
+      turnAround()
+      cooldown = Config.behavior.pickupCooldown
+    } else {
+      // Drop carried resource at current location
+      carrying.position = position
+      carrying.pickedUp = false
+      carrying = null
+      turnAround()
+      cooldown = Config.behavior.pickupCooldown
+    }
+  },
+  
+  turnAround: () => {
+    // Turn approximately 180° with random variation
+    currentAngle = velocity.angle()
+    randomOffset = random(-Config.behavior.turnAngleRange/2, Config.behavior.turnAngleRange/2)
+    newAngle = currentAngle + 180 + randomOffset
+    velocity = Vec2.fromAngle(newAngle) * Config.agents.speed
+  }
+}
+
+Resource = {
+  position: Vec2,
+  pickedUp: false,
+  
+  // Visual position follows carrying agent or stays at drop location
+  getVisualPosition: (carrier) => {
+    return pickedUp ? carrier.position : position
+  }
+}
+
+// === SIMULATION SYSTEMS ===
+Simulation = {
+  agents: [],
+  resources: [],
+  time: 0,
+  
+  initialize: () => {
+    // Spawn agents in a line
+    stepSize = Config.world.width / Config.agents.count
+    for (i in 0..Config.agents.count) {
+      x = -Config.world.width/2 + i * stepSize
+      agent = Agent.create({
+        position: Vec2(x, Config.agents.spawnY),
+        velocity: Vec2.fromAngle(random(0, 360)) * Config.agents.speed,
+        carrying: null,
+        cooldown: 0
+      })
+      agents.push(agent)
+    }
+    
+    // Spawn resources randomly
+    for (i in 0..Config.resources.count) {
+      resource = Resource.create({
+        position: Vec2(
+          random(-Config.world.width/2, Config.world.width/2),
+          random(-Config.world.height/2, Config.world.height/2)
+        ),
+        pickedUp: false
+      })
+      resources.push(resource)
+    }
+  },
+  
+  update: (deltaTime) => {
+    time += deltaTime
+    
+    // Update agent cooldowns
+    agents.forEach(agent => {
+      if (agent.cooldown > 0) {
+        agent.cooldown -= deltaTime
+      }
+    })
+    
+    // Move all agents
+    agents.forEach(agent => agent.move(deltaTime))
+    
+    // Check collisions between agents and available resources
+    agents.forEach(agent => {
+      availableResources = resources.filter(r => !r.pickedUp)
+      nearbyResource = findNearestResource(agent.position, availableResources, 15)
+      
+      if (nearbyResource) {
+        agent.interact(nearbyResource)
+      }
+    })
+  },
+  
+  findNearestResource: (position, resources, maxDistance) => {
+    return resources.find(resource => 
+      distance(position, resource.position) < maxDistance
+    )
+  },
+  
+  render: (canvas) => {
+    canvas.clear(Config.world.backgroundColor)
+    
+    // Render resources
+    resources.forEach(resource => {
+      if (!resource.pickedUp) {
+        canvas.drawRect(resource.position, Config.resources.size, Config.resources.color)
+      }
+    })
+    
+    // Render agents and carried resources
+    agents.forEach(agent => {
+      canvas.drawRect(agent.position, Config.agents.size, Config.agents.color)
+      
+      if (agent.carrying) {
+        canvas.drawRect(agent.position, Config.resources.size, Config.resources.color)
+      }
+    })
+  }
+}
+
+// === MAIN SIMULATION LOOP ===
+main = () => {
+  simulation = Simulation.create()
+  simulation.initialize()
+  
+  // Game loop
+  lastTime = now()
+  
+  gameLoop = () => {
+    currentTime = now()
+    deltaTime = (currentTime - lastTime) / 1000
+    lastTime = currentTime
+    
+    simulation.update(deltaTime)
+    simulation.render(canvas)
+    
+    requestAnimationFrame(gameLoop)
+  }
+  
+  gameLoop()
+}
+
+// === EMERGENT PROPERTIES ===
+// This simulation demonstrates:
+// 1. Self-organization: Food clusters without central coordination
+// 2. Emergence: Complex patterns from simple rules
+// 3. Collective intelligence: Group behavior exceeds individual capabilities
+// 4. Robustness: System continues functioning despite individual variations
+
+// === TRANSPILATION TARGETS ===
+// JavaScript/Canvas: Direct DOM manipulation with requestAnimationFrame
+// P5.js: Simplified graphics and interaction handling  
+// Unity C#: GameObject-based architecture with MonoBehaviours
+// Python/Pygame: Object-oriented simulation with sprite groups
+// WebGL: Hardware-accelerated rendering for large-scale simulations
+
+main()
+```
+
+## Usage Examples
+
+```SudoLang
+// Generate JavaScript Canvas version
+Simulation |> transpile(JavaScript, {
+  target: "canvas",
+  framework: "vanilla",
+  optimization: "performance"
+})
+
+// Generate P5.js version for education
+Simulation |> transpile(JavaScript, {
+  target: "p5js", 
+  style: "beginner-friendly",
+  comments: "verbose"
+})
+
+// Generate Unity C# version
+Simulation |> transpile(CSharp, {
+  target: "Unity",
+  architecture: "ECS",
+  rendering: "SpriteRenderer"
+})
+```

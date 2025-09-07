@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>An Gatherers - Emergent Behavior Simulation</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+            background-color: #f0f0f0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+        
+        .description {
+            max-width: 800px;
+            text-align: center;
+            margin-bottom: 20px;
+            color: #666;
+            line-height: 1.4;
+        }
+        
+        canvas {
+            border: 2px solid #333;
+            background-color: #5f97d4;
+            display: block;
+            margin: 0 auto;
+        }
+        
+        .controls {
+            margin-top: 15px;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        
+        button {
+            padding: 8px 16px;
+            font-size: 14px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            background-color: #333;
+            color: white;
+        }
+        
+        button:hover {
+            background-color: #555;
+        }
+        
+        .info {
+            margin-top: 15px;
+            font-size: 12px;
+            color: #888;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <h1>An Gatherers</h1>
+    <div class="description">
+        Simple agents (gray squares) follow basic rules: move forward, pick up food (red squares) when encountered, 
+        drop food if already carrying one. Watch as food naturally clusters into piles through emergent behavior!
+    </div>
+    
+    <canvas id="canvas" width="800" height="600"></canvas>
+    
+    <div class="controls">
+        <button onclick="simulation.reset()">Reset</button>
+        <button onclick="togglePause()">Pause/Resume</button>
+        <span id="status">Running...</span>
+    </div>
+    
+    <div class="info">
+        Gray squares: Agents (ants) | Red squares: Food resources | 
+        Agents turn around after food interactions, creating emergent clustering behavior
+    </div>
+    
+    <script src="gatherers.js"></script>
+</body>
+</html>
