@@ -27,7 +27,7 @@ fn boundary_wrap_system(
     primary_window: Query<&Window, With<PrimaryWindow>>,
     mut query: Query<(&mut Transform, &Bounding), With<BoundaryWrap>>,
 ) {
-    let Ok(window) = primary_window.get_single() else {
+    let Ok(window) = primary_window.single() else {
         return;
     };
 

@@ -58,7 +58,7 @@ struct Cooldown {
 
 fn setup(mut commands: Commands, primary_window: Query<&Window, With<PrimaryWindow>>) {
     commands.spawn(Camera2d::default());
-    let window = match primary_window.get_single() {
+    let window = match primary_window.single() {
         Ok(window) => window,
         Err(e) => {
             error!("Failed to get primary window: {:?}", e);
@@ -212,7 +212,7 @@ fn cooldown_system(
 }
 
 fn setup_window(mut windows: Query<&mut Window>) {
-    if let Ok(mut window) = windows.get_single_mut() {
+    if let Ok(mut window) = windows.single_mut() {
         window.resizable = true;
         // Make the window fill the available space
         window.fit_canvas_to_parent = true;

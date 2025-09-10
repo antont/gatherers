@@ -21,6 +21,25 @@ The original code is in: https://github.com/jonklein/breve/blob/master/demos/Gat
 
 Made using the Bevy game engine for Rust, reusing the wrap-around system and other lessons from the Asteroids clone Bevydroids. Thanks!
 
+## Quick Start
+
+### Native (Desktop)
+```bash
+cargo run
+```
+
+### Web Development  
+```bash
+trunk serve
+```
+
+### Web Build
+```bash
+trunk build --release
+```
+
+For detailed build instructions, troubleshooting, and deployment options, see [BUILDING.md](BUILDING.md).
+
 # TODO:
 - [x] Basic behaviour from the original Breve Gatherers working
 - [ ] UI Speed control slider:

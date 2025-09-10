@@ -17,12 +17,9 @@ impl<Hittable: Component, Hitter: Component> CollisionPlugin<Hittable, Hitter> {
 
 impl<Hittable: Component, Hitter: Component> Plugin for CollisionPlugin<Hittable, Hitter> {
     fn build(&self, app: &mut App) {
-        app.add_event::<HitEvent<Hittable, Hitter>>()
-            .add_systems(Startup, initialize_spatial_index)
-            .add_systems(
-                Startup,
-                initialize_hittables::<Hittable>.after(initialize_spatial_index),
-            )
+        app.init_resource::<SpatialIndex>()
+            .add_event::<HitEvent<Hittable, Hitter>>()
+            .add_systems(Startup, initialize_hittables::<Hittable>)
             .add_systems(Update, update_hittable_positions::<Hittable>)
             .add_systems(Update, collision_system::<Hittable, Hitter>);
     }
@@ -63,7 +60,7 @@ fn collision_system<A: Component, B: Component>(
             // if let Ok((hittable_entity, hittable_transform, hittable_bounds)) = hittables.get(nearby_entity) {
             //     let distance = (hittable_transform.translation - hitter_transform.translation).length();
             //     if distance < **hittable_bounds + **hitter_bounds {
-            hits.send(HitEvent {
+            hits.write(HitEvent {
                 entities: (nearby_entity, hitter_entity),
                 _phantom: PhantomData,
             });
@@ -72,11 +69,6 @@ fn collision_system<A: Component, B: Component>(
                    // }
         }
     }
-}
-
-fn initialize_spatial_index(mut commands: Commands) {
-    let spatial_index = SpatialIndex::default();
-    commands.insert_resource(spatial_index);
 }
 
 fn initialize_hittables<Hittable: Component>(
