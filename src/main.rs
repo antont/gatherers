@@ -1,5 +1,6 @@
 mod boundary;
 mod collision;
+mod config;
 mod spatial_index;
 
 use bevy::{
@@ -8,20 +9,17 @@ use bevy::{
     window::{PresentMode, PrimaryWindow},
 };
 use derive_more::From;
+
 use rand::Rng;
-use log;
 
 use boundary::{BoundaryPlugin, BoundaryWrap, Bounding}; //BoundaryRemoval
 use collision::{Collidable, CollisionPlugin, HitEvent}; //CollisionSystemLabel
+use config::{Colors, Config};
 
 fn main() {
-    println!("Hello, world!");
+    info!("Starting gatherers simulation");
     App::new()
-        .insert_resource(ClearColor(Color::srgb(
-            95. / 255.,
-            151. / 255.,
-            212. / 255.,
-        )))
+        .insert_resource(ClearColor(Colors::BACKGROUND))
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: "an-gatherers".to_string(),
@@ -58,73 +56,80 @@ struct Cooldown {
     timer: Timer,
 }
 
-fn setup(
-    mut commands: Commands, 
-    primary_window: Query<&Window, With<PrimaryWindow>>,
-    ant_query: Query<&Ant>,
-    food_query: Query<&Food>,
-) {
+fn setup(mut commands: Commands, primary_window: Query<&Window, With<PrimaryWindow>>) {
     commands.spawn(Camera2d::default());
     let window = match primary_window.get_single() {
         Ok(window) => window,
         Err(e) => {
-            log::error!("Failed to get primary window: {:?}", e);
+            error!("Failed to get primary window: {:?}", e);
             return;
         }
     };
 
-    let map_size = Vec2::new(window.width(), window.height()); //splat(600.0);
-    let ant_size = Vec2::new(20.0, 20.0);
-    let food_size = Vec2::new(10.0, 10.0);
-
+    let map_size = Vec2::new(window.width(), window.height());
     let half_x = (map_size.x / 2.0) as i32;
     let half_y = (map_size.y / 2.0) as i32;
 
-    // Builds and spawns the sprites
-    let mut rng = rand::thread_rng();
+    let ant_count = spawn_ants(&mut commands, half_x);
+    let food_count = spawn_food(&mut commands, half_x, half_y);
 
-    for x in (-half_x..half_x).step_by(50) {
+    info!("Spawned {} ants and {} food items", ant_count, food_count);
+}
+
+fn spawn_ants(commands: &mut Commands, half_x: i32) -> usize {
+    let mut rng = rand::thread_rng();
+    let mut count = 0;
+
+    for x in (-half_x..half_x).step_by(Config::ANT_SPAWN_STEP as usize) {
         let angle = rng.gen_range(0.0..2.0 * std::f32::consts::PI);
-        let velocity = Vec2::new(angle.cos(), angle.sin()) * 1000.0;
-        
+        let velocity = Vec2::new(angle.cos(), angle.sin()) * Config::ANT_SPEED;
+
         commands.spawn((
             Ant,
             Sprite {
-                color: Color::srgb(0.8, 0.8, 0.8),
-                custom_size: Some(ant_size),
+                color: Colors::ANT,
+                custom_size: Some(Config::ANT_SIZE),
                 ..default()
             },
-            Transform::from_translation(Vec3::new(x as f32, 100., 2.)),
+            Transform::from_translation(Vec3::new(
+                x as f32,
+                Config::ANT_SPAWN_Y,
+                Config::ANT_Z_LAYER,
+            )),
             GlobalTransform::default(),
             Velocity::from(velocity),
-            Bounding::from_radius(10.0),
+            Bounding::from_radius(Config::COLLISION_RADIUS),
             Collidable,
             BoundaryWrap,
             Visibility::default(),
         ));
+        count += 1;
     }
+    count
+}
 
-    for _ in 0..80 {
+fn spawn_food(commands: &mut Commands, half_x: i32, half_y: i32) -> usize {
+    let mut rng = rand::thread_rng();
+
+    for _ in 0..Config::FOOD_COUNT {
         let x = rng.gen_range(-half_x..half_x);
         let y = rng.gen_range(-half_y..half_y);
 
         commands.spawn((
             Food,
             Sprite {
-                color: Color::srgb(192. / 255., 2. / 255., 2. / 255.),
-                custom_size: Some(food_size),
+                color: Colors::FOOD,
+                custom_size: Some(Config::FOOD_SIZE),
                 ..default()
             },
-            Transform::from_translation(Vec3::new(x as f32, y as f32, 1.)),
+            Transform::from_translation(Vec3::new(x as f32, y as f32, Config::FOOD_Z_LAYER)),
             GlobalTransform::default(),
             Collidable,
-            Bounding::from_radius(10.0),
+            Bounding::from_radius(Config::COLLISION_RADIUS),
             Visibility::default(),
         ));
     }
-
-    println!("Ants to spawn: {}", ant_query.iter().count());
-    println!("Foods to spawn: {}", food_query.iter().count());
+    Config::FOOD_COUNT as usize
 }
 
 /// The sprite is animated by changing its translation depending on the time that has passed since
@@ -140,7 +145,6 @@ fn gatherer_movement(time: Res<Time>, mut sprite_position: Query<(&Velocity, &mu
 }
 
 fn ant_hits_system(
-    //mut rng: Local<Random>,
     mut ant_hits: EventReader<HitEvent<Food, Ant>>,
     mut commands: Commands,
     mut ant_query: Query<(&mut Velocity, Option<&Children>), (With<Ant>, Without<Cooldown>)>,
@@ -152,17 +156,14 @@ fn ant_hits_system(
         let ant = hit.hitter();
         let food = hit.hittable();
 
-        //println!("Hit 1: {}", ant.index());
         if let Ok((mut velocity, carrying)) = ant_query.get_mut(ant) {
-            //println!("[ant_hits_system] Hit: {}", ant.index());
             if let Some(carrying) = carrying {
                 if !carrying.is_empty() {
                     let carried_food = carrying[0];
                     commands.entity(carried_food).remove_parent_in_place();
-                    commands.entity(carried_food).insert(Collidable); //'Carried' component not needed, Collidable is same but negative
-                                                                      //println!("[ant_hits_system] Dropped: {}", carried_food.index());
+                    commands.entity(carried_food).insert(Collidable);
                     commands.entity(ant).insert(Cooldown {
-                        timer: Timer::from_seconds(0.1, TimerMode::Once),
+                        timer: Timer::from_seconds(Config::PICKUP_COOLDOWN, TimerMode::Once),
                     });
                 } else {
                     warn!("[ant_hits_system] There is Some(carrying) but carrying.is_empty - how come?");
@@ -180,18 +181,17 @@ fn ant_hits_system(
                 };
                 foodpos.translation.x = 0.0;
                 foodpos.translation.y = 0.0;
-                foodpos.translation.z = 3.0; //over the ant
-                                             //println!("[ant_hits_system] Picked up: {}", food.index());
+                foodpos.translation.z = Config::CARRIED_FOOD_Z_LAYER;
 
                 // Get the current direction of the ant
                 let current_angle = velocity.0.angle_to(Vec2::new(1.0, 0.0));
 
-                // Turn back 180 degrees and add a random angle from -90 to 90 degrees
+                // Turn back 180 degrees and add a random angle within the configured range
                 let angle = current_angle
                     + std::f32::consts::PI
-                    + rng.gen_range(-std::f32::consts::FRAC_PI_2..std::f32::consts::FRAC_PI_2);
+                    + rng.gen_range(-Config::TURN_ANGLE_RANGE..Config::TURN_ANGLE_RANGE);
 
-                let new_velocity = Vec2::new(angle.cos(), angle.sin()) * 1000.0;
+                let new_velocity = Vec2::new(angle.cos(), angle.sin()) * Config::ANT_SPEED;
                 *velocity = Velocity(new_velocity);
             }
         }

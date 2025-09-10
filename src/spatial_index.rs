@@ -1,5 +1,6 @@
 /* Extended from https://github.com/bevyengine/bevy/blob/latest/examples/ecs/observers.rs#L196 */
 
+use crate::config::Config;
 use bevy::prelude::*;
 use std::collections::{HashMap, HashSet};
 
@@ -8,15 +9,12 @@ pub struct SpatialIndex {
     map: HashMap<(i32, i32), HashSet<Entity>>,
 }
 
-/// Cell size has to be bigger than any `TriggerMine::radius`
-const CELL_SIZE: f32 = 20.0;
-
 impl SpatialIndex {
     // Lookup all entities within adjacent cells of our spatial index
     pub fn get_nearby(&self, pos: Vec2) -> Vec<Entity> {
         let tile = (
-            (pos.x / CELL_SIZE).floor() as i32,
-            (pos.y / CELL_SIZE).floor() as i32,
+            (pos.x / Config::SPATIAL_CELL_SIZE).floor() as i32,
+            (pos.y / Config::SPATIAL_CELL_SIZE).floor() as i32,
         );
         let mut nearby = Vec::new();
         for x in -1..2 {
@@ -31,8 +29,8 @@ impl SpatialIndex {
 
     pub fn update(&mut self, entity: Entity, pos: Vec2) {
         let tile = (
-            (pos.x / CELL_SIZE).floor() as i32,
-            (pos.y / CELL_SIZE).floor() as i32,
+            (pos.x / Config::SPATIAL_CELL_SIZE).floor() as i32,
+            (pos.y / Config::SPATIAL_CELL_SIZE).floor() as i32,
         );
         self.map.entry(tile).or_default().insert(entity);
     }
