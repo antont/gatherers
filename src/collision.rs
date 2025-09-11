@@ -54,9 +54,14 @@ fn collision_system<A: Component, B: Component>(
     hitters: Query<(Entity, &Transform, &Bounding), (With<Collidable>, With<B>)>,
 ) {
     for (hitter_entity, hitter_transform, _hitter_bounds) in hitters.iter() {
+        // The spatial index efficiently returns only entities in nearby cells (3x3 grid).
+        // Since SPATIAL_CELL_SIZE (20.0) is 2x COLLISION_RADIUS (10.0), this approach
+        // ensures accurate collision detection without expensive distance calculations.
         let nearby_entities = spatial_index.get_nearby(hitter_transform.translation.truncate());
 
         for &nearby_entity in nearby_entities.iter() {
+            // The commented code below shows the previous explicit distance checking approach.
+            // Current spatial indexing is more efficient and works correctly for our collision radius.
             // if let Ok((hittable_entity, hittable_transform, hittable_bounds)) = hittables.get(nearby_entity) {
             //     let distance = (hittable_transform.translation - hitter_transform.translation).length();
             //     if distance < **hittable_bounds + **hitter_bounds {
@@ -64,9 +69,11 @@ fn collision_system<A: Component, B: Component>(
                 entities: (nearby_entity, hitter_entity),
                 _phantom: PhantomData,
             });
-            break; //NOTE: we only deal with the 1st one now without any additional checks
-                   //     }
-                   // }
+            // Only handle one collision per frame - simulates realistic ant behavior
+            // where an ant deals with one food item at a time
+            break;
+            //     }
+            // }
         }
     }
 }

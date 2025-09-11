@@ -214,11 +214,16 @@ fn cooldown_system(
 fn setup_window(mut windows: Query<&mut Window>) {
     if let Ok(mut window) = windows.single_mut() {
         window.resizable = true;
-        // Make the window fill the available space
+        // Make the window fill the available space (crucial for web deployment)
+        // This automatically handles window resizing without needing custom resize logic
         window.fit_canvas_to_parent = true;
     }
 }
 
 fn handle_window_resize(mut _windows: Query<&mut Window>) {
-    // Optional - add custom resize logic here if needed
+    // Window resizing is handled automatically by:
+    // 1. fit_canvas_to_parent = true (for web)
+    // 2. BoundaryWrap component (keeps entities within bounds)
+    // 3. Bevy's built-in window management
+    // This function exists as a placeholder for any future custom resize logic
 }
