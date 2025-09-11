@@ -42,6 +42,7 @@ features = [
   "bevy_render",
   "bevy_core_pipeline",
   "bevy_winit",
+  "bevy_ui",
   "webgl2",
   "bevy_log"
 ]

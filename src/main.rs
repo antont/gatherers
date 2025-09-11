@@ -2,6 +2,7 @@ mod boundary;
 mod collision;
 mod config;
 mod spatial_index;
+mod ui;
 
 use bevy::{
     diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin},
@@ -14,12 +15,14 @@ use rand::Rng;
 
 use boundary::{BoundaryPlugin, BoundaryWrap, Bounding}; //BoundaryRemoval
 use collision::{Collidable, CollisionPlugin, HitEvent}; //CollisionSystemLabel
-use config::{Colors, Config};
+use config::{Colors, Config, SimulationSettings};
+use ui::UiPlugin;
 
 fn main() {
     info!("Starting gatherers simulation");
     App::new()
         .insert_resource(ClearColor(Colors::BACKGROUND))
+        .insert_resource(SimulationSettings::default())
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: "an-gatherers".to_string(),
@@ -31,6 +34,7 @@ fn main() {
         }))
         .add_plugins(BoundaryPlugin)
         .add_plugins(CollisionPlugin::<Food, Ant>::new())
+        .add_plugins(UiPlugin)
         .add_plugins(FrameTimeDiagnosticsPlugin::default())
         .add_plugins(LogDiagnosticsPlugin::default())
         .add_systems(Startup, setup)
@@ -56,7 +60,11 @@ struct Cooldown {
     timer: Timer,
 }
 
-fn setup(mut commands: Commands, primary_window: Query<&Window, With<PrimaryWindow>>) {
+fn setup(
+    mut commands: Commands,
+    primary_window: Query<&Window, With<PrimaryWindow>>,
+    settings: Res<SimulationSettings>,
+) {
     commands.spawn(Camera2d::default());
     let window = match primary_window.single() {
         Ok(window) => window,
@@ -70,19 +78,19 @@ fn setup(mut commands: Commands, primary_window: Query<&Window, With<PrimaryWind
     let half_x = (map_size.x / 2.0) as i32;
     let half_y = (map_size.y / 2.0) as i32;
 
-    let ant_count = spawn_ants(&mut commands, half_x);
-    let food_count = spawn_food(&mut commands, half_x, half_y);
+    let ant_count = spawn_ants(&mut commands, half_x, &settings);
+    let food_count = spawn_food(&mut commands, half_x, half_y, &settings);
 
     info!("Spawned {} ants and {} food items", ant_count, food_count);
 }
 
-fn spawn_ants(commands: &mut Commands, half_x: i32) -> usize {
+fn spawn_ants(commands: &mut Commands, half_x: i32, settings: &SimulationSettings) -> usize {
     let mut rng = rand::thread_rng();
     let mut count = 0;
 
     for x in (-half_x..half_x).step_by(Config::ANT_SPAWN_STEP as usize) {
         let angle = rng.gen_range(0.0..2.0 * std::f32::consts::PI);
-        let velocity = Vec2::new(angle.cos(), angle.sin()) * Config::ANT_SPEED;
+        let direction = Vec2::new(angle.cos(), angle.sin()); // Just store direction, speed applied in movement system
 
         commands.spawn((
             Ant,
@@ -97,8 +105,8 @@ fn spawn_ants(commands: &mut Commands, half_x: i32) -> usize {
                 Config::ANT_Z_LAYER,
             )),
             GlobalTransform::default(),
-            Velocity::from(velocity),
-            Bounding::from_radius(Config::COLLISION_RADIUS),
+            Velocity::from(direction),
+            Bounding::from_radius(settings.collision_radius()),
             Collidable,
             BoundaryWrap,
             Visibility::default(),
@@ -108,7 +116,12 @@ fn spawn_ants(commands: &mut Commands, half_x: i32) -> usize {
     count
 }
 
-fn spawn_food(commands: &mut Commands, half_x: i32, half_y: i32) -> usize {
+fn spawn_food(
+    commands: &mut Commands,
+    half_x: i32,
+    half_y: i32,
+    settings: &SimulationSettings,
+) -> usize {
     let mut rng = rand::thread_rng();
 
     for _ in 0..Config::FOOD_COUNT {
@@ -125,7 +138,7 @@ fn spawn_food(commands: &mut Commands, half_x: i32, half_y: i32) -> usize {
             Transform::from_translation(Vec3::new(x as f32, y as f32, Config::FOOD_Z_LAYER)),
             GlobalTransform::default(),
             Collidable,
-            Bounding::from_radius(Config::COLLISION_RADIUS),
+            Bounding::from_radius(settings.collision_radius()),
             Visibility::default(),
         ));
     }
@@ -133,12 +146,20 @@ fn spawn_food(commands: &mut Commands, half_x: i32, half_y: i32) -> usize {
 }
 
 /// The sprite is animated by changing its translation depending on the time that has passed since
-/// the last frame.
-fn gatherer_movement(time: Res<Time>, mut sprite_position: Query<(&Velocity, &mut Transform)>) {
-    //let sprite_position_collection: Vec<_> = sprite_position.iter_mut().collect();
-    //print!("[gatherer_movement] Number of sprites: {}", sprite_position_collection.len());
+/// the last frame. Uses current simulation settings for consistent speed across all ants.
+fn gatherer_movement(
+    time: Res<Time>,
+    settings: Res<SimulationSettings>,
+    mut sprite_position: Query<(&Velocity, &mut Transform), With<Ant>>,
+) {
+    // Get current speed multiplier for all ants
+    let current_speed = settings.ant_speed();
+
     for (velocity, mut transform) in &mut sprite_position {
-        let scaled_velocity = velocity.0 * time.delta_secs();
+        // Use velocity direction (normalized) * current speed setting
+        let direction = velocity.0.normalize_or_zero();
+        let actual_velocity = direction * current_speed;
+        let scaled_velocity = actual_velocity * time.delta_secs();
         transform.translation.x += scaled_velocity.x;
         transform.translation.y += scaled_velocity.y;
     }
@@ -149,6 +170,7 @@ fn ant_hits_system(
     mut commands: Commands,
     mut ant_query: Query<(&mut Velocity, Option<&Children>), (With<Ant>, Without<Cooldown>)>,
     mut food_query: Query<&mut Transform, With<Food>>,
+    settings: Res<SimulationSettings>,
 ) {
     let mut rng = rand::thread_rng();
 
@@ -163,8 +185,16 @@ fn ant_hits_system(
                     commands.entity(carried_food).remove_parent_in_place();
                     commands.entity(carried_food).insert(Collidable);
                     commands.entity(ant).insert(Cooldown {
-                        timer: Timer::from_seconds(Config::PICKUP_COOLDOWN, TimerMode::Once),
+                        timer: Timer::from_seconds(settings.pickup_cooldown(), TimerMode::Once),
                     });
+
+                    // Add direction randomization when dropping food (same as pickup behavior)
+                    let current_angle = velocity.0.angle_to(Vec2::new(1.0, 0.0));
+                    let angle = current_angle
+                        + std::f32::consts::PI
+                        + rng.gen_range(-Config::TURN_ANGLE_RANGE..Config::TURN_ANGLE_RANGE);
+                    let new_direction = Vec2::new(angle.cos(), angle.sin());
+                    *velocity = Velocity(new_direction);
                 } else {
                     warn!("[ant_hits_system] There is Some(carrying) but carrying.is_empty - how come?");
                 }
@@ -191,8 +221,8 @@ fn ant_hits_system(
                     + std::f32::consts::PI
                     + rng.gen_range(-Config::TURN_ANGLE_RANGE..Config::TURN_ANGLE_RANGE);
 
-                let new_velocity = Vec2::new(angle.cos(), angle.sin()) * Config::ANT_SPEED;
-                *velocity = Velocity(new_velocity);
+                let new_direction = Vec2::new(angle.cos(), angle.sin());
+                *velocity = Velocity(new_direction);
             }
         }
     }
