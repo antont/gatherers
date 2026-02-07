@@ -28,8 +28,7 @@ pub struct Food;
 
 #[derive(Debug, Component)]
 pub struct Cooldown {
-    pub distance_squared_remaining: f32,
-    pub last_position: Vec3,
+    pub timer: f32,
 }
 
 // Debug collision system for tests
@@ -139,11 +138,10 @@ pub fn ant_hits_system(
     mut ant_hits: MessageReader<HitEvent<Food, Ant>>,
     mut commands: Commands,
     mut ant_query: Query<
-        (&mut Velocity, Option<&Children>, &Transform),
+        (&mut Velocity, Option<&Children>),
         (With<Ant>, Without<Cooldown>),
     >,
     mut food_query: Query<&mut Transform, (With<Food>, Without<Ant>)>,
-    settings: Res<SimulationSettings>,
 ) {
     let mut rng = rand::rng();
 
@@ -151,15 +149,14 @@ pub fn ant_hits_system(
         let ant = hit.hitter();
         let food = hit.hittable();
 
-        if let Ok((mut velocity, carrying, ant_transform)) = ant_query.get_mut(ant) {
+        if let Ok((mut velocity, carrying)) = ant_query.get_mut(ant) {
             if let Some(carrying) = carrying {
                 if !carrying.is_empty() {
                     let carried_food = carrying[0];
                     commands.entity(carried_food).remove::<ChildOf>();
                     commands.entity(carried_food).insert(Collidable);
                     commands.entity(ant).insert(Cooldown {
-                        distance_squared_remaining: settings.pickup_cooldown_distance_squared(),
-                        last_position: ant_transform.translation,
+                        timer: Config::BASE_PICKUP_COOLDOWN,
                     });
 
                     // Add direction randomization when dropping food (same as pickup behavior)
@@ -184,8 +181,7 @@ pub fn ant_hits_system(
                 };
                 foodpos.translation = Vec3::new(0.0, 0.0, 0.0);
                 commands.entity(ant).insert(Cooldown {
-                    distance_squared_remaining: settings.pickup_cooldown_distance_squared(),
-                    last_position: ant_transform.translation,
+                    timer: Config::BASE_PICKUP_COOLDOWN,
                 });
 
                 // Add direction randomization when picking up food
@@ -200,20 +196,13 @@ pub fn ant_hits_system(
 }
 
 pub fn cooldown_system(
-    mut query: Query<(Entity, &mut Cooldown, &Transform), With<Ant>>,
+    time: Res<Time>,
+    mut query: Query<(Entity, &mut Cooldown), With<Ant>>,
     mut commands: Commands,
 ) {
-    for (entity, mut cooldown, transform) in query.iter_mut() {
-        // Calculate squared distance moved since last frame (avoids sqrt)
-        let distance_squared_moved =
-            (transform.translation - cooldown.last_position).length_squared();
-        cooldown.distance_squared_remaining -= distance_squared_moved;
-
-        // Update last position for next frame
-        cooldown.last_position = transform.translation;
-
-        // Remove cooldown if distance requirement met
-        if cooldown.distance_squared_remaining <= 0.0 {
+    for (entity, mut cooldown) in query.iter_mut() {
+        cooldown.timer -= time.delta_secs();
+        if cooldown.timer <= 0.0 {
             commands.entity(entity).remove::<Cooldown>();
         }
     }

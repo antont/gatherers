@@ -106,17 +106,6 @@ impl SimulationSettings {
         }
     }
 
-    /// Get cooldown time scaled for current speed
-
-    /// Get cooldown distance squared - how far ant should move before being able to pick up food again
-    /// Using squared distance to avoid expensive sqrt calculations
-    /// Distance scales with current speed to maintain consistent cooldown time duration
-    pub fn pickup_cooldown_distance_squared(&self) -> f32 {
-        // Distance ant should move at current speed during base cooldown time, squared
-        // This ensures cooldown duration stays constant regardless of speed setting
-        let distance = self.ant_speed() * Config::BASE_PICKUP_COOLDOWN;
-        distance * distance
-    }
 }
 
 /// Colors used in the simulation

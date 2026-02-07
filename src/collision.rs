@@ -32,6 +32,7 @@ pub struct HitEvent<A, B> {
 }
 
 impl<A, B> HitEvent<A, B> {
+    #[allow(dead_code)]
     pub fn new(hittable: Entity, hitter: Entity) -> Self {
         Self {
             entities: (hittable, hitter),
