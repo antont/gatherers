@@ -1,13 +1,22 @@
 [package]
 name = "an-gatherers"
 version = "0.1.4"
-edition = "2021"
+edition = "2024"
+
+[[bin]]
+name = "an-gatherers"
+path = "src/main.rs"
+
+[lib]
+name = "an_gatherers"
+path = "src/lib.rs"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-derive_more = "0.99"
-rand = "0.8"
+derive_more = { version = "1.0", features = ["from"] }
+rand = "0.9"
+getrandom = { version = "0.3", features = ["wasm_js"] }
 wasm-bindgen = "0.2"
 log = "0.4"
 
@@ -35,16 +44,15 @@ log = "0.4"
 #]
 
 [dependencies.bevy]
-version = "0.16"
+version = "0.18"
 default-features = false
 features = [
-  "bevy_sprite",
-  "bevy_render",
-  "bevy_core_pipeline",
-  "bevy_winit",
-  "bevy_ui",
-  "webgl2",
-  "bevy_log"
+  "default_app",        # Core app infrastructure (logging, diagnostics, etc.)
+  "default_platform",   # Platform support (windowing, keyboard, mouse)
+  "2d_api",             # 2D types (Sprite, Camera2d, etc.)
+  "2d_bevy_render",     # 2D rendering backend
+  "ui",                 # Bevy UI (nodes, text, layout)
+  "webgl2",             # WebGL2 for broad WASM browser support
 ]
 
 # Enable a small amount of optimization in debug mode

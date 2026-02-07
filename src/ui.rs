@@ -55,7 +55,7 @@ pub fn setup_ui(mut commands: Commands) {
                     ..default()
                 })
                 .insert(BackgroundColor(Color::srgb(0.3, 0.3, 0.3)))
-                .insert(BorderColor(Color::WHITE))
+                .insert(BorderColor::all(Color::WHITE))
                 .with_children(|parent| {
                     // Speed bar fill (shows current speed level)
                     parent.spawn((
@@ -96,6 +96,15 @@ pub fn setup_ui(mut commands: Commands) {
                 },
                 TextColor(Color::srgb(0.8, 0.8, 0.8)),
             ));
+
+            parent.spawn((
+                Text::new("[U] Unlimited Speed Mode"),
+                TextFont {
+                    font_size: 14.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.8, 0.8, 0.8)),
+            ));
         });
 }
 
@@ -126,21 +135,39 @@ fn handle_keyboard_input(
         speed_changed = true;
     }
 
+    // Toggle unlimited speed with U key
+    if keyboard_input.just_pressed(KeyCode::KeyU) {
+        new_speed = if settings.is_unlimited_speed() {
+            1.0 // Return to 1.0x from unlimited
+        } else {
+            Config::UNLIMITED_SPEED // Enter unlimited mode
+        };
+        speed_changed = true;
+    }
+
     // Update settings and UI if speed changed
     if speed_changed {
         settings.speed_multiplier = new_speed;
 
         // Update label
         if let Ok(mut text) = label_query.single_mut() {
-            text.0 = format!("Speed: {:.1}x", new_speed);
+            text.0 = if settings.is_unlimited_speed() {
+                "Speed: UNLIMITED".to_string()
+            } else {
+                format!("Speed: {:.1}x", new_speed)
+            };
         }
 
         // Update visual speed bar
         if let Ok(mut bar_node) = bar_query.single_mut() {
-            let speed_percent = ((new_speed - Config::MIN_SPEED_MULTIPLIER)
-                / (Config::MAX_SPEED_MULTIPLIER - Config::MIN_SPEED_MULTIPLIER))
-                * 100.0;
-            bar_node.width = Val::Percent(speed_percent);
+            if settings.is_unlimited_speed() {
+                bar_node.width = Val::Percent(100.0); // Full bar for unlimited
+            } else {
+                let speed_percent = ((new_speed - Config::MIN_SPEED_MULTIPLIER)
+                    / (Config::MAX_SPEED_MULTIPLIER - Config::MIN_SPEED_MULTIPLIER))
+                    * 100.0;
+                bar_node.width = Val::Percent(speed_percent);
+            }
         }
     }
 }
