@@ -47,11 +47,12 @@ log = "0.4"
 version = "0.18"
 default-features = false
 features = [
-  "default_app",        # Core app infrastructure (logging, diagnostics, etc.)
-  "default_platform",   # Platform support (windowing, keyboard, mouse)
-  "2d_api",             # 2D types (Sprite, Camera2d, etc.)
-  "2d_bevy_render",     # 2D rendering backend
-  "ui",                 # Bevy UI (nodes, text, layout)
+  "bevy_winit",         # Windowing backend
+  "bevy_log",           # Logging
+  "default_font",       # Built-in font for text rendering
+  "2d_bevy_render",     # 2D rendering (includes sprite, render, core_pipeline)
+  "bevy_ui",            # UI framework (nodes, text, layout)
+  "bevy_ui_render",     # UI rendering backend
   "webgl2",             # WebGL2 for broad WASM browser support
 ]
 
@@ -64,12 +65,7 @@ opt-level = 1
 opt-level = 3
 
 [profile.release]
-#from https://sycamore-rs.netlify.app/docs/v0.8/advanced/optimize_wasm_size
-# Do not perform backtrace for panic on release builds.
 panic = 'abort'
-# Perform optimizations on all codegen units.
 codegen-units = 1
-# Optimize for size.
-opt-level = 's' # or 'z' to optimize "aggressively" for size
-# Enable link time optimization.
+opt-level = 's'
 lto = true

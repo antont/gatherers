@@ -38,7 +38,7 @@ pub fn setup_ui(mut commands: Commands) {
             // Speed label
             parent.spawn((
                 SpeedLabel,
-                Text::new("Speed: 1.0x"),
+                Text::new("Speed: 5.0x"),
                 TextFont {
                     font_size: 18.0,
                     ..default()
@@ -61,7 +61,7 @@ pub fn setup_ui(mut commands: Commands) {
                     parent.spawn((
                         SpeedBar,
                         Node {
-                            width: Val::Percent(10.0), // Start at 1.0x (10% of max 10.0x)
+                            width: Val::Percent(49.5),
                             height: Val::Percent(100.0),
                             ..default()
                         },

@@ -136,11 +136,14 @@ fn create_test_app_with_dt(frame_ms: u64) -> App {
             Update,
             (
                 debug_collision_system::<Food, Ant>,
-                ant_hits_system,
-                collect_collision_events,
-                collect_ant_positions,
-                collect_pickup_events,
+                (
+                    ant_hits_system,
+                    collect_collision_events,
+                    collect_ant_positions,
+                    collect_pickup_events,
+                ),
             )
+                .chain()
                 .after(gatherer_movement),
         )
         .add_systems(PostUpdate, cooldown_system);

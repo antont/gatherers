@@ -67,7 +67,7 @@ pub struct SimulationSettings {
 impl Default for SimulationSettings {
     fn default() -> Self {
         Self {
-            speed_multiplier: 1.0, // Start at reasonable speed instead of max
+            speed_multiplier: 5.0,
         }
     }
 }
