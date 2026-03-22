@@ -73,39 +73,47 @@ impl Default for SimulationSettings {
 }
 
 impl SimulationSettings {
-    /// Get current ant speed based on multiplier
+    /// Nominal ant speed in units/second before anti-tunneling capping.
     pub fn ant_speed(&self) -> f32 {
-        // Note: For unlimited speed mode, actual speed is calculated dynamically
-        // in gatherer_movement() based on delta time for optimal performance
-        Config::BASE_ANT_SPEED * self.speed_multiplier
+        if self.is_unlimited_speed() {
+            Config::BASE_ANT_SPEED * Config::MAX_SPEED_MULTIPLIER * 20.0
+        } else {
+            Config::BASE_ANT_SPEED * self.speed_multiplier
+        }
     }
 
-    /// Check if we're in unlimited speed mode
     pub fn is_unlimited_speed(&self) -> bool {
         self.speed_multiplier == Config::UNLIMITED_SPEED
     }
 
-    /// Get collision radius - always consistent for accurate simulation
     pub fn collision_radius(&self) -> f32 {
-        // Keep collision radius consistent regardless of speed for simulation accuracy
         Config::BASE_COLLISION_RADIUS
     }
 
-    /// Get maximum movement distance per frame to prevent tunneling
-    /// This ensures ants can't move past food in a single frame
-    pub fn max_movement_per_frame(&self) -> f32 {
-        // Use the actual collision radius (which scales with speed) for movement limit
-        // This ensures movement limit matches collision detection expectations
-        let collision_radius = self.collision_radius();
-        if self.is_unlimited_speed() {
-            // More conservative limit for unlimited mode to prevent tunneling
-            collision_radius * 0.3
-        } else {
-            // Normal limit: allow movement up to half the collision radius per frame
-            collision_radius * 0.5
-        }
+    /// Maximum safe displacement per frame to prevent tunneling.
+    /// Derived from collision geometry: must be smaller than the sum of
+    /// ant + food radii so the discrete overlap check never misses.
+    pub fn safe_step_distance(&self) -> f32 {
+        self.collision_radius() * 2.0 * 0.9
     }
 
+    /// Effective speed in units/sec after accounting for the anti-tunneling cap.
+    /// For unlimited mode this is the fastest collision-safe speed for the
+    /// current frame duration; for normal modes it equals the nominal speed
+    /// unless the frame is so slow it would cause tunneling.
+    pub fn effective_speed(&self, delta_secs: f32) -> f32 {
+        if delta_secs <= f32::EPSILON {
+            return 0.0;
+        }
+        let nominal = self.ant_speed();
+        let max_safe = self.safe_step_distance() / delta_secs;
+        nominal.min(max_safe)
+    }
+
+    /// Effective speed expressed as a multiplier of BASE_ANT_SPEED.
+    pub fn effective_multiplier(&self, delta_secs: f32) -> f32 {
+        self.effective_speed(delta_secs) / Config::BASE_ANT_SPEED
+    }
 }
 
 /// Colors used in the simulation

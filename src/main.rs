@@ -1,22 +1,11 @@
-mod boundary;
-mod collision;
-mod config;
-mod spatial_index;
-mod ui;
+use an_gatherers::*;
 
 use bevy::{
     diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin},
     prelude::*,
     window::{PresentMode, PrimaryWindow},
 };
-use derive_more::From;
-
 use rand::Rng;
-
-use boundary::{BoundaryPlugin, BoundaryWrap, Bounding}; //BoundaryRemoval
-use collision::{Collidable, CollisionPlugin, HitEvent}; //CollisionSystemLabel
-use config::{Colors, Config, SimulationSettings};
-use ui::UiPlugin;
 
 fn main() {
     info!("Starting gatherers simulation");
@@ -26,8 +15,7 @@ fn main() {
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: "an-gatherers".to_string(),
-                //resolution: (800.0, 600.0).into(),
-                present_mode: PresentMode::AutoVsync, //PresentMode::Immediate,
+                present_mode: PresentMode::AutoVsync,
                 ..Default::default()
             }),
             ..Default::default()
@@ -43,20 +31,6 @@ fn main() {
         .add_systems(Update, ant_hits_system)
         .add_systems(PostUpdate, cooldown_system)
         .run();
-}
-
-#[derive(Debug, Component, From)] //, Default, Deref, DerefMut, From, Resource)]
-pub struct Velocity(Vec2);
-
-#[derive(Debug, Component, Default)]
-struct Ant;
-
-#[derive(Debug, Component, Default)]
-struct Food;
-
-#[derive(Debug, Component)]
-struct Cooldown {
-    timer: f32,
 }
 
 fn setup(
@@ -89,7 +63,7 @@ fn spawn_ants(commands: &mut Commands, half_x: i32, settings: &SimulationSetting
 
     for x in (-half_x..half_x).step_by(Config::ANT_SPAWN_STEP as usize) {
         let angle = rng.random_range(0.0..2.0 * std::f32::consts::PI);
-        let direction = Vec2::new(angle.cos(), angle.sin()); // Just store direction, speed applied in movement system
+        let direction = Vec2::new(angle.cos(), angle.sin());
 
         commands.spawn((
             Ant,
@@ -140,128 +114,9 @@ fn spawn_food(
     Config::FOOD_COUNT as usize
 }
 
-/// The sprite is animated by changing its translation depending on the time that has passed since
-/// the last frame. Uses current simulation settings for consistent speed across all ants.
-fn gatherer_movement(
-    time: Res<Time>,
-    settings: Res<SimulationSettings>,
-    mut sprite_position: Query<(&Velocity, &mut Transform), With<Ant>>,
-) {
-    let max_movement = settings.max_movement_per_frame();
-    let delta_time = time.delta_secs();
-
-    // Calculate current speed based on performance and mode
-    let current_speed = if settings.is_unlimited_speed() {
-        // For unlimited mode: use a reasonable high speed but not infinite
-        settings.ant_speed() * 20.0 // 20x faster than max normal speed
-    } else {
-        settings.ant_speed()
-    };
-
-    for (velocity, mut transform) in &mut sprite_position {
-        // Use velocity direction (normalized) * current speed setting
-        let direction = velocity.0.normalize_or_zero();
-        let actual_velocity = direction * current_speed;
-        let desired_movement = actual_velocity * delta_time;
-
-        // Limit movement distance to prevent tunneling through food
-        let movement_distance = desired_movement.length();
-        let final_movement = if movement_distance > max_movement {
-            // Scale down movement to maximum allowed distance
-            desired_movement.normalize() * max_movement
-        } else {
-            desired_movement
-        };
-
-        transform.translation.x += final_movement.x;
-        transform.translation.y += final_movement.y;
-    }
-}
-
-fn ant_hits_system(
-    mut ant_hits: MessageReader<HitEvent<Food, Ant>>,
-    mut commands: Commands,
-    mut ant_query: Query<
-        (&mut Velocity, Option<&Children>),
-        (With<Ant>, Without<Cooldown>),
-    >,
-    mut food_query: Query<&mut Transform, (With<Food>, Without<Ant>)>,
-) {
-    let mut rng = rand::rng();
-
-    for hit in ant_hits.read() {
-        let ant = hit.hitter();
-        let food = hit.hittable();
-
-        if let Ok((mut velocity, carrying)) = ant_query.get_mut(ant) {
-            if let Some(carrying) = carrying {
-                if !carrying.is_empty() {
-                    let carried_food = carrying[0];
-                    commands.entity(carried_food).remove::<ChildOf>();
-                    commands.entity(carried_food).insert(Collidable);
-                    commands.entity(ant).insert(Cooldown {
-                        timer: Config::BASE_PICKUP_COOLDOWN,
-                    });
-
-                    // Add direction randomization when dropping food (same as pickup behavior)
-                    let current_angle = velocity.0.angle_to(Vec2::new(1.0, 0.0));
-                    let angle = current_angle
-                        + std::f32::consts::PI
-                        + rng.random_range(-Config::TURN_ANGLE_RANGE..Config::TURN_ANGLE_RANGE);
-                    let new_direction = Vec2::new(angle.cos(), angle.sin());
-                    *velocity = Velocity(new_direction);
-                } else {
-                    warn!("[ant_hits_system] There is Some(carrying) but carrying.is_empty - how come?");
-                }
-            } else {
-                commands.entity(ant).add_child(food);
-                commands.entity(food).remove::<Collidable>();
-
-                let mut foodpos = match food_query.get_mut(food) {
-                    Ok(transform) => transform,
-                    Err(e) => {
-                        error!("Failed to get food transform: {:?}", e);
-                        continue;
-                    }
-                };
-                foodpos.translation.x = 0.0;
-                foodpos.translation.y = 0.0;
-                foodpos.translation.z = Config::CARRIED_FOOD_Z_LAYER;
-
-                // Get the current direction of the ant
-                let current_angle = velocity.0.angle_to(Vec2::new(1.0, 0.0));
-
-                // Turn back 180 degrees and add a random angle within the configured range
-                let angle = current_angle
-                    + std::f32::consts::PI
-                    + rng.random_range(-Config::TURN_ANGLE_RANGE..Config::TURN_ANGLE_RANGE);
-
-                let new_direction = Vec2::new(angle.cos(), angle.sin());
-                *velocity = Velocity(new_direction);
-            }
-        }
-    }
-}
-
-fn cooldown_system(
-    time: Res<Time>,
-    mut query: Query<(Entity, &mut Cooldown), With<Ant>>,
-    mut commands: Commands,
-) {
-    for (entity, mut cooldown) in query.iter_mut() {
-        cooldown.timer -= time.delta_secs();
-        if cooldown.timer <= 0.0 {
-            commands.entity(entity).remove::<Cooldown>();
-        }
-    }
-}
-
 fn setup_window(mut windows: Query<&mut Window>) {
     if let Ok(mut window) = windows.single_mut() {
         window.resizable = true;
-        // Make the window fill the available space (crucial for web deployment)
-        // This automatically handles window resizing without needing custom resize logic
         window.fit_canvas_to_parent = true;
     }
 }
-
