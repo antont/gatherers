@@ -73,39 +73,34 @@ impl Default for SimulationSettings {
 }
 
 impl SimulationSettings {
-    /// Get current ant speed based on multiplier
+    /// Get current ant speed in units/second, including unlimited mode.
     pub fn ant_speed(&self) -> f32 {
-        // Note: For unlimited speed mode, actual speed is calculated dynamically
-        // in gatherer_movement() based on delta time for optimal performance
-        Config::BASE_ANT_SPEED * self.speed_multiplier
+        if self.is_unlimited_speed() {
+            Config::BASE_ANT_SPEED * Config::MAX_SPEED_MULTIPLIER * 20.0
+        } else {
+            Config::BASE_ANT_SPEED * self.speed_multiplier
+        }
     }
 
-    /// Check if we're in unlimited speed mode
     pub fn is_unlimited_speed(&self) -> bool {
         self.speed_multiplier == Config::UNLIMITED_SPEED
     }
 
-    /// Get collision radius - always consistent for accurate simulation
     pub fn collision_radius(&self) -> f32 {
-        // Keep collision radius consistent regardless of speed for simulation accuracy
         Config::BASE_COLLISION_RADIUS
     }
 
-    /// Get maximum movement distance per frame to prevent tunneling
-    /// This ensures ants can't move past food in a single frame
+    /// Cap per-frame movement to prevent tunneling through food.
+    /// Must stay below the collision distance (ant_radius + food_radius)
+    /// so the post-movement overlap check never misses.
     pub fn max_movement_per_frame(&self) -> f32 {
-        // Use the actual collision radius (which scales with speed) for movement limit
-        // This ensures movement limit matches collision detection expectations
-        let collision_radius = self.collision_radius();
+        let collision_distance = self.collision_radius() * 2.0;
         if self.is_unlimited_speed() {
-            // More conservative limit for unlimited mode to prevent tunneling
-            collision_radius * 0.3
+            collision_distance * 10.0
         } else {
-            // Normal limit: allow movement up to half the collision radius per frame
-            collision_radius * 0.5
+            collision_distance * 0.9
         }
     }
-
 }
 
 /// Colors used in the simulation

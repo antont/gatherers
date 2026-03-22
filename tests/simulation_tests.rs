@@ -454,3 +454,320 @@ fn test_cooldown_duration_consistency_across_speeds() {
         );
     }
 }
+
+// --- Regression tests: speed scaling ---
+
+fn create_movement_test_app(speed_multiplier: f32) -> App {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins)
+        .insert_resource(SimulationSettings {
+            speed_multiplier,
+        })
+        .insert_resource(Time::<()>::default())
+        .insert_resource(TimeUpdateStrategy::ManualDuration(
+            std::time::Duration::from_millis(16),
+        ))
+        .add_systems(Update, gatherer_movement);
+    app
+}
+
+fn spawn_rightward_ant(app: &mut App) -> Entity {
+    app.world_mut()
+        .spawn((
+            Ant,
+            Velocity(Vec2::new(1.0, 0.0)),
+            Transform::from_translation(Vec3::ZERO),
+        ))
+        .id()
+}
+
+const MOVEMENT_TEST_FRAMES: usize = 10;
+
+fn measure_displacement(speed_multiplier: f32) -> f32 {
+    let mut app = create_movement_test_app(speed_multiplier);
+    let ant = spawn_rightward_ant(&mut app);
+
+    for _ in 0..MOVEMENT_TEST_FRAMES {
+        app.update();
+    }
+
+    app.world()
+        .entity(ant)
+        .get::<Transform>()
+        .unwrap()
+        .translation
+        .x
+}
+
+#[test]
+fn test_speed_scaling_is_monotonic() {
+    let speeds = [1.0_f32, 2.0, 5.0, 10.0];
+    let mut displacements = Vec::new();
+
+    for &speed in &speeds {
+        let disp = measure_displacement(speed);
+        displacements.push((speed, disp));
+        println!("Speed {:.1}x: displacement = {:.4}", speed, disp);
+    }
+
+    for i in 1..displacements.len() {
+        let (prev_speed, prev_disp) = displacements[i - 1];
+        let (curr_speed, curr_disp) = displacements[i];
+        assert!(
+            curr_disp > prev_disp,
+            "Speed {:.1}x displacement ({:.4}) should exceed {:.1}x displacement ({:.4})",
+            curr_speed,
+            curr_disp,
+            prev_speed,
+            prev_disp
+        );
+    }
+}
+
+#[test]
+fn test_unlimited_speed_moves_forward_not_backward() {
+    let disp = measure_displacement(Config::UNLIMITED_SPEED);
+
+    println!("Unlimited speed: displacement = {:.4}", disp);
+
+    assert!(
+        disp > 0.0,
+        "Unlimited speed should move in velocity direction (positive X), got {:.4}",
+        disp
+    );
+}
+
+#[test]
+fn test_unlimited_speed_faster_than_max_normal() {
+    let normal_disp = measure_displacement(Config::MAX_SPEED_MULTIPLIER);
+    let unlimited_disp = measure_displacement(Config::UNLIMITED_SPEED);
+
+    println!(
+        "Max normal ({:.1}x): {:.4}, unlimited: {:.4}",
+        Config::MAX_SPEED_MULTIPLIER, normal_disp, unlimited_disp
+    );
+
+    assert!(
+        unlimited_disp > normal_disp,
+        "Unlimited ({:.4}) should exceed max normal speed ({:.4})",
+        unlimited_disp,
+        normal_disp
+    );
+}
+
+// --- Regression tests: food lifecycle ---
+
+#[test]
+fn test_food_entity_count_preserved() {
+    let mut app = create_test_app();
+
+    let world = app.world_mut();
+    let mut food_ids = Vec::new();
+
+    // Spawn 5 food items in a line
+    let _spatial_index = world.resource_mut::<SpatialIndex>();
+    drop(_spatial_index);
+
+    for i in 0..5 {
+        let x = (i as f32) * 30.0;
+        let food = world
+            .spawn((
+                Food,
+                Transform::from_translation(Vec3::new(x, 0.0, 0.0)),
+                Bounding::from_radius(5.0),
+                Collidable,
+            ))
+            .id();
+        food_ids.push((food, x));
+    }
+
+    let mut spatial_index = world.resource_mut::<SpatialIndex>();
+    for &(food, x) in &food_ids {
+        spatial_index.update(food, Vec2::new(x, 0.0));
+    }
+    drop(spatial_index);
+
+    // Spawn an ant that will collide with the food
+    world.spawn((
+        Ant,
+        Velocity(Vec2::new(1.0, 0.0)),
+        Transform::from_translation(Vec3::new(-10.0, 0.0, 0.0)),
+        Bounding::from_radius(10.0),
+        Collidable,
+    ));
+
+    let initial_food_count = food_ids.len();
+
+    // Run enough frames for ant to interact with food
+    for _ in 0..200 {
+        app.update();
+    }
+
+    // Count remaining food entities using a query
+    let remaining_food: Vec<Entity> = app
+        .world_mut()
+        .query_filtered::<Entity, With<Food>>()
+        .iter(app.world())
+        .collect();
+
+    println!(
+        "Started with {} food, {} remaining after 200 frames",
+        initial_food_count,
+        remaining_food.len()
+    );
+
+    assert_eq!(
+        remaining_food.len(),
+        initial_food_count,
+        "Food entities must never be despawned"
+    );
+}
+
+#[test]
+fn test_dropped_food_position_near_ant() {
+    let mut app = create_test_app();
+
+    let world = app.world_mut();
+
+    // Ant already carrying food1 (manually set up the parent-child relationship)
+    let ant = world
+        .spawn((
+            Ant,
+            Velocity(Vec2::new(1.0, 0.0)),
+            Transform::from_translation(Vec3::new(100.0, 50.0, 0.0)),
+            Bounding::from_radius(10.0),
+            Collidable,
+        ))
+        .id();
+
+    let food1 = world
+        .spawn((
+            Food,
+            Transform::from_translation(Vec3::new(0.0, 0.0, 0.0)),
+            Bounding::from_radius(5.0),
+        ))
+        .id();
+
+    // Attach food1 as child of ant (simulating a previous pickup)
+    world.entity_mut(ant).add_child(food1);
+
+    // Place food2 directly ahead of the ant to force a drop
+    let food2 = world
+        .spawn((
+            Food,
+            Transform::from_translation(Vec3::new(105.0, 50.0, 0.0)),
+            Bounding::from_radius(5.0),
+            Collidable,
+        ))
+        .id();
+
+    let mut spatial_index = world.resource_mut::<SpatialIndex>();
+    spatial_index.update(food2, Vec2::new(105.0, 50.0));
+    drop(spatial_index);
+
+    // Run enough frames for ant to reach food2 and trigger drop
+    for _ in 0..50 {
+        app.update();
+    }
+
+    // Check that the drop happened
+    let ant_has_children = app
+        .world()
+        .entity(ant)
+        .get::<Children>()
+        .is_some_and(|c| !c.is_empty());
+
+    let food1_pos = app
+        .world()
+        .entity(food1)
+        .get::<Transform>()
+        .unwrap()
+        .translation;
+
+    println!(
+        "Food1 world position after drop: {:?}, ant still carrying: {}",
+        food1_pos, ant_has_children
+    );
+
+    // The drop should have happened
+    assert!(
+        !ant_has_children,
+        "Ant should have dropped food1 after hitting food2"
+    );
+
+    // Dropped food should be near where the ant was (~100,50), not at origin (0,0)
+    let dist_from_origin = Vec2::new(food1_pos.x, food1_pos.y).length();
+    assert!(
+        dist_from_origin > 20.0,
+        "Dropped food should be near ant's drop position, not at origin. Position: {:?}, distance from origin: {:.1}",
+        food1_pos,
+        dist_from_origin
+    );
+}
+
+#[test]
+fn test_dropped_food_regains_collidable() {
+    let mut app = create_test_app();
+
+    let world = app.world_mut();
+
+    // Ant already carrying food1
+    let ant = world
+        .spawn((
+            Ant,
+            Velocity(Vec2::new(1.0, 0.0)),
+            Transform::from_translation(Vec3::new(0.0, 0.0, 0.0)),
+            Bounding::from_radius(10.0),
+            Collidable,
+        ))
+        .id();
+
+    let food1 = world
+        .spawn((
+            Food,
+            Transform::from_translation(Vec3::new(0.0, 0.0, 0.0)),
+            Bounding::from_radius(5.0),
+            // No Collidable - it's been "picked up"
+        ))
+        .id();
+
+    world.entity_mut(ant).add_child(food1);
+
+    // Place food2 right ahead to trigger drop
+    let food2 = world
+        .spawn((
+            Food,
+            Transform::from_translation(Vec3::new(5.0, 0.0, 0.0)),
+            Bounding::from_radius(5.0),
+            Collidable,
+        ))
+        .id();
+
+    let mut spatial_index = world.resource_mut::<SpatialIndex>();
+    spatial_index.update(food2, Vec2::new(5.0, 0.0));
+    drop(spatial_index);
+
+    // Run frames to trigger collision and drop
+    for _ in 0..20 {
+        app.update();
+    }
+
+    let ant_carrying = app
+        .world()
+        .entity(ant)
+        .get::<Children>()
+        .is_some_and(|c| !c.is_empty());
+
+    let food1_collidable = app.world().entity(food1).get::<Collidable>().is_some();
+
+    println!(
+        "After drop: ant carrying={}, food1 collidable={}",
+        ant_carrying, food1_collidable
+    );
+
+    assert!(!ant_carrying, "Ant should have dropped food after hitting food2");
+    assert!(
+        food1_collidable,
+        "Dropped food must regain Collidable component"
+    );
+}
