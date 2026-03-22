@@ -6,6 +6,7 @@ pub mod ui;
 
 use bevy::prelude::*;
 use derive_more::From;
+use log::{error, warn};
 use rand::Rng;
 
 pub use boundary::{BoundaryPlugin, BoundaryWrap, Bounding};
