@@ -9,7 +9,7 @@ pub struct UiPlugin;
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, setup_ui)
-            .add_systems(Update, handle_keyboard_input);
+            .add_systems(Update, (handle_keyboard_input, update_speed_display).chain());
     }
 }
 
@@ -98,7 +98,7 @@ pub fn setup_ui(mut commands: Commands) {
             ));
 
             parent.spawn((
-                Text::new("[U] Unlimited Speed Mode"),
+                Text::new("[U] Max Safe Speed"),
                 TextFont {
                     font_size: 14.0,
                     ..default()
@@ -111,63 +111,61 @@ pub fn setup_ui(mut commands: Commands) {
 fn handle_keyboard_input(
     keyboard_input: Res<ButtonInput<KeyCode>>,
     mut settings: ResMut<SimulationSettings>,
+) {
+    let mut new_speed = settings.speed_multiplier;
+
+    if keyboard_input.just_pressed(KeyCode::Minus) {
+        new_speed = (new_speed - 0.5).max(Config::MIN_SPEED_MULTIPLIER);
+    }
+
+    if keyboard_input.just_pressed(KeyCode::Equal) {
+        new_speed = (new_speed + 0.5).min(Config::MAX_SPEED_MULTIPLIER);
+    }
+
+    if keyboard_input.just_pressed(KeyCode::KeyR) {
+        new_speed = 1.0;
+    }
+
+    if keyboard_input.just_pressed(KeyCode::KeyU) {
+        new_speed = if settings.is_unlimited_speed() {
+            1.0
+        } else {
+            Config::UNLIMITED_SPEED
+        };
+    }
+
+    settings.speed_multiplier = new_speed;
+}
+
+fn update_speed_display(
+    time: Res<Time>,
+    settings: Res<SimulationSettings>,
     mut label_query: Query<&mut Text, With<SpeedLabel>>,
     mut bar_query: Query<&mut Node, With<SpeedBar>>,
 ) {
-    let mut speed_changed = false;
-    let mut new_speed = settings.speed_multiplier;
+    let delta = time.delta_secs();
 
-    // Decrease speed with - (minus) key
-    if keyboard_input.just_pressed(KeyCode::Minus) {
-        new_speed = (new_speed - 0.5).max(Config::MIN_SPEED_MULTIPLIER);
-        speed_changed = true;
-    }
-
-    // Increase speed with = (equals) key
-    if keyboard_input.just_pressed(KeyCode::Equal) {
-        new_speed = (new_speed + 0.5).min(Config::MAX_SPEED_MULTIPLIER);
-        speed_changed = true;
-    }
-
-    // Reset to 1.0x with R key
-    if keyboard_input.just_pressed(KeyCode::KeyR) {
-        new_speed = 1.0;
-        speed_changed = true;
-    }
-
-    // Toggle unlimited speed with U key
-    if keyboard_input.just_pressed(KeyCode::KeyU) {
-        new_speed = if settings.is_unlimited_speed() {
-            1.0 // Return to 1.0x from unlimited
-        } else {
-            Config::UNLIMITED_SPEED // Enter unlimited mode
-        };
-        speed_changed = true;
-    }
-
-    // Update settings and UI if speed changed
-    if speed_changed {
-        settings.speed_multiplier = new_speed;
-
-        // Update label
-        if let Ok(mut text) = label_query.single_mut() {
-            text.0 = if settings.is_unlimited_speed() {
-                "Speed: UNLIMITED".to_string()
+    if let Ok(mut text) = label_query.single_mut() {
+        text.0 = if settings.is_unlimited_speed() {
+            if delta > f32::EPSILON {
+                let mult = settings.effective_multiplier(delta);
+                format!("Speed: MAX (~{:.1}x)", mult)
             } else {
-                format!("Speed: {:.1}x", new_speed)
-            };
-        }
-
-        // Update visual speed bar
-        if let Ok(mut bar_node) = bar_query.single_mut() {
-            if settings.is_unlimited_speed() {
-                bar_node.width = Val::Percent(100.0); // Full bar for unlimited
-            } else {
-                let speed_percent = ((new_speed - Config::MIN_SPEED_MULTIPLIER)
-                    / (Config::MAX_SPEED_MULTIPLIER - Config::MIN_SPEED_MULTIPLIER))
-                    * 100.0;
-                bar_node.width = Val::Percent(speed_percent);
+                "Speed: MAX".to_string()
             }
+        } else {
+            format!("Speed: {:.1}x", settings.speed_multiplier)
+        };
+    }
+
+    if let Ok(mut bar_node) = bar_query.single_mut() {
+        if settings.is_unlimited_speed() {
+            bar_node.width = Val::Percent(100.0);
+        } else {
+            let speed_percent = ((settings.speed_multiplier - Config::MIN_SPEED_MULTIPLIER)
+                / (Config::MAX_SPEED_MULTIPLIER - Config::MIN_SPEED_MULTIPLIER))
+                * 100.0;
+            bar_node.width = Val::Percent(speed_percent);
         }
     }
 }

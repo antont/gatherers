@@ -73,7 +73,7 @@ impl Default for SimulationSettings {
 }
 
 impl SimulationSettings {
-    /// Get current ant speed in units/second, including unlimited mode.
+    /// Nominal ant speed in units/second before anti-tunneling capping.
     pub fn ant_speed(&self) -> f32 {
         if self.is_unlimited_speed() {
             Config::BASE_ANT_SPEED * Config::MAX_SPEED_MULTIPLIER * 20.0
@@ -90,16 +90,29 @@ impl SimulationSettings {
         Config::BASE_COLLISION_RADIUS
     }
 
-    /// Cap per-frame movement to prevent tunneling through food.
-    /// Must stay below the collision distance (ant_radius + food_radius)
-    /// so the post-movement overlap check never misses.
-    pub fn max_movement_per_frame(&self) -> f32 {
-        let collision_distance = self.collision_radius() * 2.0;
-        if self.is_unlimited_speed() {
-            collision_distance * 10.0
-        } else {
-            collision_distance * 0.9
+    /// Maximum safe displacement per frame to prevent tunneling.
+    /// Derived from collision geometry: must be smaller than the sum of
+    /// ant + food radii so the discrete overlap check never misses.
+    pub fn safe_step_distance(&self) -> f32 {
+        self.collision_radius() * 2.0 * 0.9
+    }
+
+    /// Effective speed in units/sec after accounting for the anti-tunneling cap.
+    /// For unlimited mode this is the fastest collision-safe speed for the
+    /// current frame duration; for normal modes it equals the nominal speed
+    /// unless the frame is so slow it would cause tunneling.
+    pub fn effective_speed(&self, delta_secs: f32) -> f32 {
+        if delta_secs <= f32::EPSILON {
+            return 0.0;
         }
+        let nominal = self.ant_speed();
+        let max_safe = self.safe_step_distance() / delta_secs;
+        nominal.min(max_safe)
+    }
+
+    /// Effective speed expressed as a multiplier of BASE_ANT_SPEED.
+    pub fn effective_multiplier(&self, delta_secs: f32) -> f32 {
+        self.effective_speed(delta_secs) / Config::BASE_ANT_SPEED
     }
 }
 

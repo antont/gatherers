@@ -36,19 +36,17 @@ pub fn gatherer_movement(
     settings: Res<SimulationSettings>,
     mut sprite_position: Query<(&Velocity, &mut Transform), With<Ant>>,
 ) {
-    let max_movement = settings.max_movement_per_frame();
     let delta_time = time.delta_secs();
-
-    let current_speed = settings.ant_speed();
+    let safe_step = settings.safe_step_distance();
+    let speed = settings.effective_speed(delta_time);
 
     for (velocity, mut transform) in &mut sprite_position {
         let direction = velocity.0.normalize_or_zero();
-        let actual_velocity = direction * current_speed;
-        let desired_movement = actual_velocity * delta_time;
+        let desired_movement = direction * speed * delta_time;
 
         let movement_distance = desired_movement.length();
-        let final_movement = if movement_distance > max_movement {
-            desired_movement.normalize() * max_movement
+        let final_movement = if movement_distance > safe_step {
+            desired_movement.normalize() * safe_step
         } else {
             desired_movement
         };

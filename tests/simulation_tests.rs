@@ -113,8 +113,9 @@ fn collect_pickup_events(
     }
 }
 
-// Helper to create a test simulation app
-fn create_test_app() -> App {
+const DEFAULT_FRAME_MS: u64 = 16;
+
+fn create_test_app_with_dt(frame_ms: u64) -> App {
     let mut app = App::new();
 
     app.add_plugins(MinimalPlugins)
@@ -124,10 +125,9 @@ fn create_test_app() -> App {
         .insert_resource(TestEventCollector::default())
         .insert_resource(Time::<()>::default())
         .insert_resource(FrameCount::default())
-        // Use fixed timestep for deterministic testing
         .insert_resource(TimeUpdateStrategy::ManualDuration(
-            std::time::Duration::from_millis(16),
-        )) // 60 FPS
+            std::time::Duration::from_millis(frame_ms),
+        ))
         .add_systems(Startup, initialize_hittables::<Food>)
         .add_systems(Update, update_hittable_positions::<Food>)
         .add_systems(Update, frame_counter_system)
@@ -146,6 +146,10 @@ fn create_test_app() -> App {
         .add_systems(PostUpdate, cooldown_system);
 
     app
+}
+
+fn create_test_app() -> App {
+    create_test_app_with_dt(DEFAULT_FRAME_MS)
 }
 
 // Helper to spawn a simple test scenario
@@ -381,7 +385,7 @@ fn test_collision_tunneling_at_slow_speed() {
             let distance = (ant_transform.translation - food_transform.translation).length();
             let collision_distance = **ant_bounding + **food_bounding;
             let settings = world.resource::<SimulationSettings>();
-            let max_movement = settings.max_movement_per_frame();
+            let max_movement = settings.safe_step_distance();
 
             println!(
                 "Frame {}: ant at {:?}, food at {:?}, distance: {:.2}, collision_distance: {:.2}, max_movement: {:.2}",
@@ -437,7 +441,7 @@ fn test_cooldown_duration_consistency_across_speeds() {
             }
         }
 
-        let time_per_frame = 1.0 / 60.0; // 60 FPS
+        let time_per_frame = DEFAULT_FRAME_MS as f32 / 1000.0;
         let cooldown_duration = cooldown_frames as f32 * time_per_frame;
 
         println!(
@@ -457,7 +461,7 @@ fn test_cooldown_duration_consistency_across_speeds() {
 
 // --- Regression tests: speed scaling ---
 
-fn create_movement_test_app(speed_multiplier: f32) -> App {
+fn create_movement_test_app_with_dt(speed_multiplier: f32, frame_ms: u64) -> App {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins)
         .insert_resource(SimulationSettings {
@@ -465,10 +469,14 @@ fn create_movement_test_app(speed_multiplier: f32) -> App {
         })
         .insert_resource(Time::<()>::default())
         .insert_resource(TimeUpdateStrategy::ManualDuration(
-            std::time::Duration::from_millis(16),
+            std::time::Duration::from_millis(frame_ms),
         ))
         .add_systems(Update, gatherer_movement);
     app
+}
+
+fn create_movement_test_app(speed_multiplier: f32) -> App {
+    create_movement_test_app_with_dt(speed_multiplier, DEFAULT_FRAME_MS)
 }
 
 fn spawn_rightward_ant(app: &mut App) -> Entity {
@@ -484,7 +492,11 @@ fn spawn_rightward_ant(app: &mut App) -> Entity {
 const MOVEMENT_TEST_FRAMES: usize = 10;
 
 fn measure_displacement(speed_multiplier: f32) -> f32 {
-    let mut app = create_movement_test_app(speed_multiplier);
+    measure_displacement_with_dt(speed_multiplier, DEFAULT_FRAME_MS)
+}
+
+fn measure_displacement_with_dt(speed_multiplier: f32, frame_ms: u64) -> f32 {
+    let mut app = create_movement_test_app_with_dt(speed_multiplier, frame_ms);
     let ant = spawn_rightward_ant(&mut app);
 
     for _ in 0..MOVEMENT_TEST_FRAMES {
@@ -537,21 +549,246 @@ fn test_unlimited_speed_moves_forward_not_backward() {
     );
 }
 
+// --- Frame-rate-aware speed tests ---
+
 #[test]
-fn test_unlimited_speed_faster_than_max_normal() {
-    let normal_disp = measure_displacement(Config::MAX_SPEED_MULTIPLIER);
-    let unlimited_disp = measure_displacement(Config::UNLIMITED_SPEED);
+fn test_unlimited_at_least_as_fast_as_max_normal_all_frame_rates() {
+    for &dt_ms in &[8u64, 16, 33, 50] {
+        let normal_disp = measure_displacement_with_dt(Config::MAX_SPEED_MULTIPLIER, dt_ms);
+        let unlimited_disp = measure_displacement_with_dt(Config::UNLIMITED_SPEED, dt_ms);
+
+        println!(
+            "At {}ms: max normal = {:.2}, unlimited = {:.2}",
+            dt_ms, normal_disp, unlimited_disp
+        );
+
+        assert!(
+            unlimited_disp >= normal_disp - 0.1,
+            "At {}ms, unlimited ({:.2}) should be >= max normal ({:.2})",
+            dt_ms,
+            unlimited_disp,
+            normal_disp
+        );
+    }
+}
+
+#[test]
+fn test_effective_speed_unlimited_adapts_to_frame_time() {
+    let settings = SimulationSettings {
+        speed_multiplier: Config::UNLIMITED_SPEED,
+    };
+    let safe_step = settings.safe_step_distance();
+
+    for &dt_ms in &[8u64, 16, 33, 50] {
+        let dt = dt_ms as f32 / 1000.0;
+        let effective = settings.effective_speed(dt);
+        let expected = safe_step / dt;
+
+        println!(
+            "At {}ms: effective_speed = {:.1}, expected = {:.1}",
+            dt_ms, effective, expected
+        );
+
+        assert!(
+            (effective - expected).abs() < 0.01,
+            "At {}ms, effective_speed should be {:.1}, got {:.1}",
+            dt_ms,
+            expected,
+            effective
+        );
+    }
+}
+
+#[test]
+fn test_effective_speed_normal_unaffected_at_high_fps() {
+    let settings = SimulationSettings {
+        speed_multiplier: 5.0,
+    };
+    let dt = 0.016;
+    let effective = settings.effective_speed(dt);
+    let nominal = Config::BASE_ANT_SPEED * 5.0;
+
+    assert!(
+        (effective - nominal).abs() < 0.01,
+        "At 60fps, 5x should not be capped: expected {}, got {}",
+        nominal,
+        effective
+    );
+}
+
+#[test]
+fn test_effective_multiplier_unlimited() {
+    let settings = SimulationSettings {
+        speed_multiplier: Config::UNLIMITED_SPEED,
+    };
+
+    let mult_60 = settings.effective_multiplier(0.016);
+    println!("At 60fps: effective multiplier = {:.2}x", mult_60);
+    assert!(
+        mult_60 > 10.0,
+        "Unlimited at 60fps should exceed 10x: got {:.1}x",
+        mult_60
+    );
+
+    let mult_30 = settings.effective_multiplier(0.033);
+    println!("At 30fps: effective multiplier = {:.2}x", mult_30);
+    assert!(
+        mult_30 > 5.0 && mult_30 < 6.0,
+        "Unlimited at 30fps should be ~5.5x: got {:.1}x",
+        mult_30
+    );
+}
+
+#[test]
+fn test_unlimited_displacement_equals_safe_step_per_frame() {
+    let safe_step = SimulationSettings::default().safe_step_distance();
+
+    for &dt_ms in &[8u64, 16, 33, 50] {
+        let disp = measure_displacement_with_dt(Config::UNLIMITED_SPEED, dt_ms);
+        let non_zero_frames = (MOVEMENT_TEST_FRAMES - 1) as f32;
+        let per_frame = disp / non_zero_frames;
+
+        println!(
+            "At {}ms: per-frame displacement = {:.2}, safe_step = {:.2}",
+            dt_ms, per_frame, safe_step
+        );
+
+        assert!(
+            (per_frame - safe_step).abs() < 0.5,
+            "At {}ms, unlimited should move {:.1} per frame, got {:.1}",
+            dt_ms,
+            safe_step,
+            per_frame
+        );
+    }
+}
+
+#[test]
+fn test_effective_speed_zero_delta_returns_zero() {
+    let settings = SimulationSettings {
+        speed_multiplier: Config::UNLIMITED_SPEED,
+    };
+    assert_eq!(settings.effective_speed(0.0), 0.0);
+    assert_eq!(settings.effective_multiplier(0.0), 0.0);
+}
+
+// --- Regression test: unlimited speed must not tunnel through food ---
+
+#[test]
+fn test_unlimited_speed_no_tunneling() {
+    let mut app = create_test_app();
+
+    {
+        let world = app.world_mut();
+        world.insert_resource(SimulationSettings {
+            speed_multiplier: Config::UNLIMITED_SPEED,
+        });
+    }
+
+    let world = app.world_mut();
+
+    let ant = world
+        .spawn((
+            Ant,
+            Velocity(Vec2::new(1.0, 0.0)),
+            Transform::from_translation(Vec3::new(-50.0, 0.0, Config::ANT_Z_LAYER)),
+            Bounding::from_radius(10.0),
+            Collidable,
+        ))
+        .id();
+
+    let food = world
+        .spawn((
+            Food,
+            Transform::from_translation(Vec3::new(50.0, 0.0, Config::FOOD_Z_LAYER)),
+            Bounding::from_radius(5.0),
+            Collidable,
+        ))
+        .id();
+
+    let mut spatial_index = world.resource_mut::<SpatialIndex>();
+    spatial_index.update(food, Vec2::new(50.0, 0.0));
+    drop(spatial_index);
+
+    for _ in 0..100 {
+        app.update();
+    }
+
+    let ant_has_children = app
+        .world()
+        .entity(ant)
+        .get::<Children>()
+        .is_some_and(|c| !c.is_empty());
+
+    let ant_pos = app
+        .world()
+        .entity(ant)
+        .get::<Transform>()
+        .unwrap()
+        .translation;
 
     println!(
-        "Max normal ({:.1}x): {:.4}, unlimited: {:.4}",
-        Config::MAX_SPEED_MULTIPLIER, normal_disp, unlimited_disp
+        "Unlimited speed: ant at {:?}, carrying food: {}",
+        ant_pos, ant_has_children
     );
 
     assert!(
-        unlimited_disp > normal_disp,
-        "Unlimited ({:.4}) should exceed max normal speed ({:.4})",
-        unlimited_disp,
-        normal_disp
+        ant_has_children,
+        "Ant should have picked up food at unlimited speed (not tunneled through it). \
+         Ant ended at {:?}",
+        ant_pos
+    );
+}
+
+#[test]
+fn test_unlimited_speed_no_tunneling_at_low_fps() {
+    let mut app = create_test_app_with_dt(50);
+
+    {
+        let world = app.world_mut();
+        world.insert_resource(SimulationSettings {
+            speed_multiplier: Config::UNLIMITED_SPEED,
+        });
+    }
+
+    let world = app.world_mut();
+
+    let ant = world
+        .spawn((
+            Ant,
+            Velocity(Vec2::new(1.0, 0.0)),
+            Transform::from_translation(Vec3::new(-50.0, 0.0, Config::ANT_Z_LAYER)),
+            Bounding::from_radius(10.0),
+            Collidable,
+        ))
+        .id();
+
+    let food = world
+        .spawn((
+            Food,
+            Transform::from_translation(Vec3::new(50.0, 0.0, Config::FOOD_Z_LAYER)),
+            Bounding::from_radius(5.0),
+            Collidable,
+        ))
+        .id();
+
+    let mut spatial_index = world.resource_mut::<SpatialIndex>();
+    spatial_index.update(food, Vec2::new(50.0, 0.0));
+    drop(spatial_index);
+
+    for _ in 0..200 {
+        app.update();
+    }
+
+    let ant_has_children = app
+        .world()
+        .entity(ant)
+        .get::<Children>()
+        .is_some_and(|c| !c.is_empty());
+
+    assert!(
+        ant_has_children,
+        "Ant should pick up food at unlimited speed even at 20fps (50ms frames)"
     );
 }
 
