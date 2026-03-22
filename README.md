@@ -42,7 +42,7 @@ For detailed build instructions, troubleshooting, and deployment options, see [B
 
 # TODO:
 - [x] Basic behaviour from the original Breve Gatherers working
-- [ ] UI Speed control slider:
+- [.] UI Speed control slider:
   * need to set the speed to a var & the pick-up cooldown to be calculated from the speed sensibly
 - [x] Respond to windows size change in the browser, and make full browser window sized.
   * Works on the desktop already, just needs the browser hooks
