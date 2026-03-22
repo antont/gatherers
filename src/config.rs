@@ -52,6 +52,9 @@ impl Config {
     /// Speed multiplier range for UI control
     pub const MIN_SPEED_MULTIPLIER: f32 = 0.1;
     pub const MAX_SPEED_MULTIPLIER: f32 = 10.0;
+
+    /// Special unlimited speed value (negative indicates unlimited)
+    pub const UNLIMITED_SPEED: f32 = -1.0;
 }
 
 /// Runtime configuration resource that can be modified during gameplay
@@ -72,20 +75,37 @@ impl Default for SimulationSettings {
 impl SimulationSettings {
     /// Get current ant speed based on multiplier
     pub fn ant_speed(&self) -> f32 {
+        // Note: For unlimited speed mode, actual speed is calculated dynamically
+        // in gatherer_movement() based on delta time for optimal performance
         Config::BASE_ANT_SPEED * self.speed_multiplier
     }
 
-    /// Get collision radius scaled for current speed to prevent tunneling
-    /// Higher speed = larger collision radius
-    pub fn collision_radius(&self) -> f32 {
-        Config::BASE_COLLISION_RADIUS * (1.0 + (self.speed_multiplier - 1.0) * 0.5)
+    /// Check if we're in unlimited speed mode
+    pub fn is_unlimited_speed(&self) -> bool {
+        self.speed_multiplier == Config::UNLIMITED_SPEED
     }
 
-    /// Get cooldown time scaled for current speed
-    /// Higher speed = shorter relative cooldown for consistent behavior
-    pub fn pickup_cooldown(&self) -> f32 {
-        Config::BASE_PICKUP_COOLDOWN / self.speed_multiplier.max(0.1)
+    /// Get collision radius - always consistent for accurate simulation
+    pub fn collision_radius(&self) -> f32 {
+        // Keep collision radius consistent regardless of speed for simulation accuracy
+        Config::BASE_COLLISION_RADIUS
     }
+
+    /// Get maximum movement distance per frame to prevent tunneling
+    /// This ensures ants can't move past food in a single frame
+    pub fn max_movement_per_frame(&self) -> f32 {
+        // Use the actual collision radius (which scales with speed) for movement limit
+        // This ensures movement limit matches collision detection expectations
+        let collision_radius = self.collision_radius();
+        if self.is_unlimited_speed() {
+            // More conservative limit for unlimited mode to prevent tunneling
+            collision_radius * 0.3
+        } else {
+            // Normal limit: allow movement up to half the collision radius per frame
+            collision_radius * 0.5
+        }
+    }
+
 }
 
 /// Colors used in the simulation
