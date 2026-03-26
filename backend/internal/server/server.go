@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
-	"strconv"
 	"sync"
 
 	"github.com/antont/gatherers/backend/internal/config"
@@ -107,11 +107,166 @@ func (s *Server) handleSummary(w http.ResponseWriter, _ *http.Request) {
 func (s *Server) handleDashboard(w http.ResponseWriter, _ *http.Request) {
 	summary := s.store.GlobalSummary()
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write([]byte("<!doctype html><html><body>" +
-		"<h1>Gatherers Backend</h1>" +
-		"<p>Connected sims: " + strconv.Itoa(summary.ConnectedSimCount) + "</p>" +
-		"<p>Loose food: " + strconv.Itoa(summary.LooseFoodCount) + "</p>" +
-		"</body></html>"))
+	_, _ = fmt.Fprintf(w, `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Gatherers Backend</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #111827;
+      --panel: #1f2937;
+      --panel-alt: #0f172a;
+      --text: #e5e7eb;
+      --muted: #94a3b8;
+      --accent: #34d399;
+      --border: #334155;
+    }
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    main {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+      gap: 16px;
+      margin: 24px 0;
+    }
+    .card, .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+    }
+    .label {
+      color: var(--muted);
+      font-size: 0.9rem;
+      margin-bottom: 8px;
+    }
+    .value {
+      font-size: 2rem;
+      font-weight: 700;
+    }
+    table {
+      width: 100%%;
+      border-collapse: collapse;
+    }
+    th, td {
+      padding: 10px 12px;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+    }
+    th {
+      color: var(--muted);
+      font-size: 0.85rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .status {
+      color: var(--muted);
+      margin-top: 8px;
+    }
+    .accent {
+      color: var(--accent);
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Gatherers Backend</h1>
+    <p class="status">Realtime dashboard fed by <span class="accent">/ws/dashboard</span>.</p>
+    <section class="cards">
+      <div class="card">
+        <div class="label">Connected sims</div>
+        <div class="value" id="connected-sims-value">%d</div>
+      </div>
+      <div class="card">
+        <div class="label">Loose food</div>
+        <div class="value" id="loose-food-value">%d</div>
+      </div>
+      <div class="card">
+        <div class="label">Occupied cells</div>
+        <div class="value" id="occupied-cells-value">%d</div>
+      </div>
+      <div class="card">
+        <div class="label">Mean nearest-neighbor distance</div>
+        <div class="value" id="nearest-neighbor-value">%.2f</div>
+      </div>
+    </section>
+    <section class="panel">
+      <div class="label">Last update</div>
+      <div id="last-updated-value">server-rendered snapshot</div>
+    </section>
+    <section class="panel" style="margin-top: 16px;">
+      <div class="label">Connected sims</div>
+      <table>
+        <thead>
+          <tr>
+            <th>Sim</th>
+            <th>Drops</th>
+            <th>Pickups</th>
+            <th>Moves</th>
+            <th>Loose food</th>
+          </tr>
+        </thead>
+        <tbody id="sim-table-body">
+          <tr><td colspan="5">Waiting for realtime data...</td></tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+  <script>
+    const connectedSimsValue = document.getElementById("connected-sims-value");
+    const looseFoodValue = document.getElementById("loose-food-value");
+    const occupiedCellsValue = document.getElementById("occupied-cells-value");
+    const nearestNeighborValue = document.getElementById("nearest-neighbor-value");
+    const lastUpdatedValue = document.getElementById("last-updated-value");
+    const simTableBody = document.getElementById("sim-table-body");
+
+    function render(snapshot) {
+      connectedSimsValue.textContent = String(snapshot.summary.connected_sim_count ?? 0);
+      looseFoodValue.textContent = String(snapshot.summary.loose_food_count ?? 0);
+      occupiedCellsValue.textContent = String(snapshot.summary.occupied_cell_count ?? 0);
+      nearestNeighborValue.textContent = Number(snapshot.summary.nearest_neighbor_mean_distance ?? 0).toFixed(2);
+      lastUpdatedValue.textContent = new Date().toLocaleTimeString();
+
+      const sims = [...(snapshot.sims ?? [])].sort((a, b) => a.sim_id.localeCompare(b.sim_id));
+      if (sims.length === 0) {
+        simTableBody.innerHTML = '<tr><td colspan="5">No sims connected yet.</td></tr>';
+        return;
+      }
+
+      simTableBody.innerHTML = sims.map((sim) => {
+        return '<tr>' +
+          '<td>' + sim.sim_id + '</td>' +
+          '<td>' + sim.drop_count + '</td>' +
+          '<td>' + sim.pickup_count + '</td>' +
+          '<td>' + sim.turn_move_count + '</td>' +
+          '<td>' + sim.loose_food_count + '</td>' +
+          '</tr>';
+      }).join('');
+    }
+
+    const scheme = window.location.protocol === "https:" ? "wss" : "ws";
+    const socket = new WebSocket(scheme + "://" + window.location.host + "/ws/dashboard");
+    socket.addEventListener("message", (event) => {
+      render(JSON.parse(event.data));
+    });
+    socket.addEventListener("close", () => {
+      lastUpdatedValue.textContent = "dashboard websocket disconnected";
+    });
+  </script>
+</body>
+</html>`, summary.ConnectedSimCount, summary.LooseFoodCount, summary.OccupiedCellCount, summary.NearestNeighborMeanDistance)
 }
 
 func (s *Server) handleDashboardWS(w http.ResponseWriter, r *http.Request) {

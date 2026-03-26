@@ -172,3 +172,32 @@ func TestDashboardShowsConnectedSimAndLooseFoodCounts(t *testing.T) {
 		t.Fatalf("expected dashboard to include the connected sim or loose food counts, body was %q", bodyText)
 	}
 }
+
+func TestDashboardPageBootstrapsRealtimeWebsocketUi(t *testing.T) {
+	srv := New(config.Config{})
+	testServer := httptest.NewServer(srv.Handler())
+	defer testServer.Close()
+
+	resp, err := http.Get(testServer.URL + "/")
+	if err != nil {
+		t.Fatalf("expected dashboard endpoint to respond: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("expected dashboard body to be readable: %v", err)
+	}
+
+	bodyText := string(body)
+	for _, required := range []string{
+		"/ws/dashboard",
+		"connected-sims-value",
+		"loose-food-value",
+		"sim-table-body",
+	} {
+		if !strings.Contains(bodyText, required) {
+			t.Fatalf("expected dashboard HTML to contain %q, body was %q", required, bodyText)
+		}
+	}
+}
