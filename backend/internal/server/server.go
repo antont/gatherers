@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 
 	"github.com/antont/gatherers/backend/internal/config"
 	"github.com/antont/gatherers/backend/internal/state"
@@ -26,6 +27,7 @@ func New(cfg config.Config) *Server {
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("/", s.handleDashboard)
 	mux.HandleFunc("/api/summary", s.handleSummary)
 	mux.HandleFunc("/ws/ingest", s.handleIngest)
 	return mux
@@ -80,6 +82,16 @@ type foodPickupPayload struct {
 func (s *Server) handleSummary(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(s.store.GlobalSummary())
+}
+
+func (s *Server) handleDashboard(w http.ResponseWriter, _ *http.Request) {
+	summary := s.store.GlobalSummary()
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write([]byte("<!doctype html><html><body>" +
+		"<h1>Gatherers Backend</h1>" +
+		"<p>Connected sims: " + strconv.Itoa(summary.ConnectedSimCount) + "</p>" +
+		"<p>Loose food: " + strconv.Itoa(summary.LooseFoodCount) + "</p>" +
+		"</body></html>"))
 }
 
 func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
