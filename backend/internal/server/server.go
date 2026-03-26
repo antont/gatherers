@@ -80,6 +80,12 @@ type foodDropPayload struct {
 	Y      float64 `json:"y"`
 }
 
+type helloPayload struct {
+	SimName   string `json:"sim_name"`
+	AntCount  int    `json:"ant_count"`
+	FoodCount int    `json:"food_count"`
+}
+
 type foodPickupPayload struct {
 	FoodID string `json:"food_id"`
 }
@@ -216,6 +222,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, _ *http.Request) {
         <thead>
           <tr>
             <th>Sim</th>
+            <th>Ants</th>
             <th>Drops</th>
             <th>Pickups</th>
             <th>Moves</th>
@@ -223,7 +230,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, _ *http.Request) {
           </tr>
         </thead>
         <tbody id="sim-table-body">
-          <tr><td colspan="5">Waiting for realtime data...</td></tr>
+          <tr><td colspan="6">Waiting for realtime data...</td></tr>
         </tbody>
       </table>
     </section>
@@ -245,13 +252,14 @@ func (s *Server) handleDashboard(w http.ResponseWriter, _ *http.Request) {
 
       const sims = [...(snapshot.sims ?? [])].sort((a, b) => a.sim_id.localeCompare(b.sim_id));
       if (sims.length === 0) {
-        simTableBody.innerHTML = '<tr><td colspan="5">No sims connected yet.</td></tr>';
+        simTableBody.innerHTML = '<tr><td colspan="6">No sims connected yet.</td></tr>';
         return;
       }
 
       simTableBody.innerHTML = sims.map((sim) => {
         return '<tr>' +
           '<td>' + sim.sim_id + '</td>' +
+          '<td>' + (sim.ant_count ?? 0) + '</td>' +
           '<td>' + sim.drop_count + '</td>' +
           '<td>' + sim.pickup_count + '</td>' +
           '<td>' + sim.turn_move_count + '</td>' +
@@ -318,7 +326,13 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 
 		switch event.Type {
 		case "sim_hello":
-			s.store.RecordHello(event.SimID)
+			var payload helloPayload
+			if len(event.Payload) > 0 {
+				if err := json.Unmarshal(event.Payload, &payload); err != nil {
+					return
+				}
+			}
+			s.store.RecordHello(event.SimID, payload.AntCount)
 			s.broadcastDashboardSnapshot()
 		case "sim_food_snapshot":
 			var payload foodSnapshotPayload

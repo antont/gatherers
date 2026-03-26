@@ -29,6 +29,7 @@ type foodPosition struct {
 
 type simState struct {
 	looseFood      map[string]foodPosition
+	antCount       int
 	pickupCount    int
 	dropCount      int
 	turnMoveCount  int
@@ -42,6 +43,7 @@ type Store struct {
 
 type SimSummary struct {
 	SimID         string `json:"sim_id"`
+	AntCount      int    `json:"ant_count"`
 	PickupCount   int    `json:"pickup_count"`
 	DropCount     int    `json:"drop_count"`
 	TurnMoveCount int    `json:"turn_move_count"`
@@ -64,11 +66,12 @@ func (s *Store) RecordDrop(simID string, drop FoodDrop) {
 	state.dropCount++
 }
 
-func (s *Store) RecordHello(simID string) {
+func (s *Store) RecordHello(simID string, antCount int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.ensureSim(simID)
+	state := s.ensureSim(simID)
+	state.antCount = antCount
 }
 
 func (s *Store) RecordFoodSnapshot(simID string, foods []FoodDrop) {
@@ -139,6 +142,7 @@ func (s *Store) SimSummaries() []SimSummary {
 	for simID, sim := range s.sims {
 		summaries = append(summaries, SimSummary{
 			SimID:          simID,
+			AntCount:       sim.antCount,
 			PickupCount:    sim.pickupCount,
 			DropCount:      sim.dropCount,
 			TurnMoveCount:  sim.turnMoveCount,

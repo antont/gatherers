@@ -114,7 +114,9 @@ func (s *ClientEventStream) NextEvent() Event {
 			Seq:         s.seq,
 			TimestampMS: s.timestampMS,
 			Payload: map[string]any{
-				"sim_name": s.opts.SimName,
+				"sim_name":   s.opts.SimName,
+				"ant_count":  s.opts.InitialAntCount,
+				"food_count": s.opts.InitialFoodCount,
 			},
 		}
 	}

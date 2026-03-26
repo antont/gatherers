@@ -190,6 +190,55 @@ func TestStartupFoodSnapshotSeedsLooseFoodState(t *testing.T) {
 	}
 }
 
+func TestSimHelloAntCountAppearsInPerSimSummary(t *testing.T) {
+	srv := New(config.Config{})
+	testServer := httptest.NewServer(srv.Handler())
+	defer testServer.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	wsURL := strings.Replace(testServer.URL, "http://", "ws://", 1) + "/ws/ingest"
+	conn, _, err := websocket.Dial(ctx, wsURL, nil)
+	if err != nil {
+		t.Fatalf("expected websocket ingest endpoint to accept connection: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	event := map[string]any{
+		"type":         "sim_hello",
+		"sim_id":       "sim-meta",
+		"seq":          1,
+		"timestamp_ms": 1000,
+		"payload": map[string]any{
+			"sim_name":   "meta",
+			"ant_count":  26,
+			"food_count": 80,
+		},
+	}
+	if err := wsjson.Write(ctx, conn, event); err != nil {
+		t.Fatalf("expected sim_hello to be accepted over websocket: %v", err)
+	}
+
+	resp, err := http.Get(testServer.URL + "/api/sims")
+	if err != nil {
+		t.Fatalf("expected sims endpoint to respond: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var sims []struct {
+		SimID    string `json:"sim_id"`
+		AntCount int    `json:"ant_count"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&sims); err != nil {
+		t.Fatalf("expected sims JSON to decode: %v", err)
+	}
+
+	if len(sims) != 1 || sims[0].SimID != "sim-meta" || sims[0].AntCount != 26 {
+		t.Fatalf("expected ant_count metadata to appear in sim summary, got %+v", sims)
+	}
+}
+
 func TestDashboardShowsConnectedSimAndLooseFoodCounts(t *testing.T) {
 	srv := New(config.Config{})
 	testServer := httptest.NewServer(srv.Handler())
@@ -279,6 +328,8 @@ func TestDashboardPageBootstrapsRealtimeWebsocketUi(t *testing.T) {
 		"connected-sims-value",
 		"loose-food-value",
 		"sim-table-body",
+		"sim.ant_count",
+		"Ants",
 	} {
 		if !strings.Contains(bodyText, required) {
 			t.Fatalf("expected dashboard HTML to contain %q, body was %q", required, bodyText)

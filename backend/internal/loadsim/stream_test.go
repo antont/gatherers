@@ -51,6 +51,9 @@ func TestClientEventStreamStartsWithHelloAndDeterministicEvents(t *testing.T) {
 	if !strings.Contains(mustJSON(t, events[1]), "\"foods\"") {
 		t.Fatalf("expected startup snapshot payload to include foods, got %+v", events[1])
 	}
+	if !strings.Contains(mustJSON(t, events[0]), "\"ant_count\":26") {
+		t.Fatalf("expected startup hello payload to include ant_count, got %+v", events[0])
+	}
 }
 
 func TestClientEventStreamRotatesAcrossMultipleAnts(t *testing.T) {

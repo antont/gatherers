@@ -45,7 +45,11 @@ func TestDashboardWebsocketReceivesUpdatedSnapshotAfterIngest(t *testing.T) {
 			SimID:       "sim-dashboard",
 			Seq:         1,
 			TimestampMS: 1000,
-			Payload:     map[string]any{"sim_name": "dashboard"},
+			Payload: map[string]any{
+				"sim_name":   "dashboard",
+				"ant_count":  26,
+				"food_count": 80,
+			},
 		},
 		{
 			Type:        "food_drop",
@@ -68,6 +72,7 @@ func TestDashboardWebsocketReceivesUpdatedSnapshotAfterIngest(t *testing.T) {
 			snapshot.Summary.LooseFoodCount == 1 &&
 			len(snapshot.Sims) == 1 &&
 			snapshot.Sims[0].SimID == "sim-dashboard" &&
+			snapshot.Sims[0].AntCount == 26 &&
 			snapshot.Sims[0].DropCount == 1 &&
 			snapshot.Sims[0].LooseFoodCount == 1
 	})
@@ -78,7 +83,7 @@ func TestDashboardWebsocketReceivesUpdatedSnapshotAfterIngest(t *testing.T) {
 	if update.Summary.LooseFoodCount != 1 {
 		t.Fatalf("expected loose food count 1, got %d", update.Summary.LooseFoodCount)
 	}
-	if len(update.Sims) != 1 || update.Sims[0].SimID != "sim-dashboard" || update.Sims[0].DropCount != 1 || update.Sims[0].LooseFoodCount != 1 {
+	if len(update.Sims) != 1 || update.Sims[0].SimID != "sim-dashboard" || update.Sims[0].AntCount != 26 || update.Sims[0].DropCount != 1 || update.Sims[0].LooseFoodCount != 1 {
 		t.Fatalf("unexpected dashboard sim snapshot: %+v", update.Sims)
 	}
 }
@@ -90,6 +95,7 @@ type dashboardSnapshotMessage struct {
 	} `json:"summary"`
 	Sims []struct {
 		SimID          string `json:"sim_id"`
+		AntCount       int    `json:"ant_count"`
 		DropCount      int    `json:"drop_count"`
 		LooseFoodCount int    `json:"loose_food_count"`
 	} `json:"sims"`
