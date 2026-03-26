@@ -23,6 +23,7 @@ fn main() {
         }))
         .add_plugins(BoundaryPlugin)
         .add_plugins(CollisionPlugin::<Food, Ant>::new())
+        .add_plugins(BackendClientPlugin)
         .add_plugins(UiPlugin)
         .add_plugins(FrameTimeDiagnosticsPlugin::default())
         .add_plugins(LogDiagnosticsPlugin::default())

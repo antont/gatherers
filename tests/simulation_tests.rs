@@ -121,6 +121,7 @@ fn create_test_app_with_dt(frame_ms: u64) -> App {
     app.add_plugins(MinimalPlugins)
         .init_resource::<SpatialIndex>()
         .add_message::<HitEvent<Food, Ant>>()
+        .add_message::<BackendSimEvent>()
         .insert_resource(SimulationSettings::default())
         .insert_resource(TestEventCollector::default())
         .insert_resource(Time::<()>::default())

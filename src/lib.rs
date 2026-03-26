@@ -1,6 +1,7 @@
 pub mod boundary;
 pub mod collision;
 pub mod config;
+pub mod net;
 pub mod spatial_index;
 pub mod ui;
 
@@ -12,6 +13,7 @@ use rand::Rng;
 pub use boundary::{BoundaryPlugin, BoundaryWrap, Bounding};
 pub use collision::{Collidable, CollisionPlugin, HitEvent};
 pub use config::{Colors, Config, SimulationSettings};
+pub use net::{BackendClientConfig, BackendClientPlugin, BackendSimEvent, PendingBackendEvents};
 pub use spatial_index::SpatialIndex;
 pub use ui::UiPlugin;
 
@@ -59,6 +61,7 @@ pub fn gatherer_movement(
 
 pub fn ant_hits_system(
     mut ant_hits: MessageReader<HitEvent<Food, Ant>>,
+    mut backend_events: MessageWriter<BackendSimEvent>,
     mut commands: Commands,
     mut ant_query: Query<
         (&mut Velocity, Option<&Children>, &Transform),
@@ -100,6 +103,25 @@ pub fn ant_hits_system(
                         + rng.random_range(-Config::TURN_ANGLE_RANGE..Config::TURN_ANGLE_RANGE);
                     let new_direction = Vec2::new(angle.cos(), angle.sin());
                     *velocity = Velocity(new_direction);
+                    let ant_id = ant.to_bits().to_string();
+                    let food_id = carried_food.to_bits().to_string();
+                    backend_events.write(BackendSimEvent::FoodDrop {
+                        ant_id: ant_id.clone(),
+                        food_id,
+                        x: ant_transform.translation.x,
+                        y: ant_transform.translation.y,
+                        direction_x: new_direction.x,
+                        direction_y: new_direction.y,
+                        frame: 0,
+                    });
+                    backend_events.write(BackendSimEvent::AntTurnMove {
+                        ant_id,
+                        x: ant_transform.translation.x,
+                        y: ant_transform.translation.y,
+                        direction_x: new_direction.x,
+                        direction_y: new_direction.y,
+                        frame: 0,
+                    });
                 } else {
                     warn!("[ant_hits_system] There is Some(carrying) but carrying.is_empty - how come?");
                 }
@@ -124,6 +146,25 @@ pub fn ant_hits_system(
                     + rng.random_range(-Config::TURN_ANGLE_RANGE..Config::TURN_ANGLE_RANGE);
                 let new_direction = Vec2::new(angle.cos(), angle.sin());
                 *velocity = Velocity(new_direction);
+                let ant_id = ant.to_bits().to_string();
+                let food_id = food.to_bits().to_string();
+                backend_events.write(BackendSimEvent::FoodPickup {
+                    ant_id: ant_id.clone(),
+                    food_id,
+                    x: ant_transform.translation.x,
+                    y: ant_transform.translation.y,
+                    direction_x: new_direction.x,
+                    direction_y: new_direction.y,
+                    frame: 0,
+                });
+                backend_events.write(BackendSimEvent::AntTurnMove {
+                    ant_id,
+                    x: ant_transform.translation.x,
+                    y: ant_transform.translation.y,
+                    direction_x: new_direction.x,
+                    direction_y: new_direction.y,
+                    frame: 0,
+                });
             }
         }
     }
