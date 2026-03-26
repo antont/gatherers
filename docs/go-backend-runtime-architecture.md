@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This document describes how the Go backend operates at runtime after ingest was decoupled from dashboard aggregation.
+This document describes how the Go backend operates at runtime.
 
 It focuses on:
 
@@ -11,18 +11,16 @@ It focuses on:
 - concurrency, locking, and goroutine structure
 - expected workloads during demos and stress runs
 
-This is a runtime architecture note, not a wire-format contract. For message schema details, see `docs/go-backend-v1-contract.md`.
+This is a runtime architecture note, not a wire-format contract. For message schema details, see `docs/go-backend-v1-contract.md`. For thoughts on making the analysis side more explicitly actor-shaped, see `docs/go-backend-actor-notes.md`.
 
 ## High-Level Model
 
-The backend now has two intentionally separate responsibilities:
+The backend has two intentionally separate responsibilities:
 
 1. Accept and record simulation events as cheaply as possible.
 2. Compute expensive aggregate dashboard views only when someone is actually watching.
 
-That separation is the key architectural change.
-
-Incoming sim traffic no longer triggers immediate aggregate recomputation. Instead, ingest updates in-memory state and marks the cached dashboard snapshot dirty. A separate background worker decides when to rebuild that snapshot.
+Incoming sim traffic does not trigger immediate aggregate recomputation. Instead, ingest updates in-memory state and marks the cached dashboard snapshot dirty. A separate background worker decides when to rebuild that snapshot.
 
 ## Main Participants
 
@@ -238,7 +236,7 @@ Other nontrivial aggregate work includes:
 - counting occupied cells
 - building sorted or copied per-sim summaries for output
 
-These operations are acceptable in the background worker but were too expensive when previously triggered synchronously from ingest.
+These operations are isolated in the background worker rather than the ingest path because they are significantly more expensive than per-event state updates.
 
 ## Workload Types
 
@@ -272,18 +270,15 @@ Typical triggers:
 - an open dashboard in the browser
 - API polling during demos or tests
 
-## Why The New Architecture Matters
+## Architectural Consequences
 
-Before the refactor, every ingest event immediately recomputed dashboard state. Under heavy load, that meant the backend spent most of its time doing aggregate math instead of accepting new events.
+This architecture has several important properties:
 
-Now the system behaves much better:
-
-- sim traffic updates state quickly
-- aggregate math is amortized and coalesced
+- sim traffic updates state quickly because ingest only performs cheap per-event work
+- aggregate math is amortized and coalesced instead of being repeated for every incoming message
 - expensive work only happens when a consumer exists
-- dashboard counts continue to rise under stress instead of freezing near the start
-
-In short, throughput is protected by decoupling ingestion from observation.
+- dashboard and API views are eventually consistent snapshots rather than per-event synchronous views
+- throughput is protected by separating observation from ingestion
 
 ## Demo And Stress Interpretation
 
@@ -311,4 +306,4 @@ Notable limitations:
 - no distributed aggregation
 - no incremental nearest-neighbor algorithm yet
 
-Those are future scalability topics. The current design is primarily about correct decoupling, clear concurrency, and reliable live demos under meaningful local load.
+Those are future scalability topics. The current design prioritizes clear concurrency boundaries, reliable behavior under meaningful local load, and a small backend that is easy to reason about.
