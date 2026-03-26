@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"sync"
 
 	"github.com/antont/gatherers/backend/internal/config"
 	"github.com/antont/gatherers/backend/internal/state"
@@ -14,14 +15,16 @@ import (
 )
 
 type Server struct {
-	cfg config.Config
+	cfg  config.Config
 	store *state.Store
+	hub  *dashboardHub
 }
 
 func New(cfg config.Config) *Server {
 	return &Server{
 		cfg:   cfg,
 		store: state.NewStore(50),
+		hub:   newDashboardHub(),
 	}
 }
 
@@ -30,6 +33,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/", s.handleDashboard)
 	mux.HandleFunc("/api/sims", s.handleSims)
 	mux.HandleFunc("/api/summary", s.handleSummary)
+	mux.HandleFunc("/ws/dashboard", s.handleDashboardWS)
 	mux.HandleFunc("/ws/ingest", s.handleIngest)
 	return mux
 }
@@ -80,6 +84,16 @@ type foodPickupPayload struct {
 	FoodID string `json:"food_id"`
 }
 
+type dashboardSnapshot struct {
+	Summary state.Summary      `json:"summary"`
+	Sims    []state.SimSummary `json:"sims"`
+}
+
+type dashboardHub struct {
+	mu      sync.Mutex
+	clients map[chan dashboardSnapshot]struct{}
+}
+
 func (s *Server) handleSims(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(s.store.SimSummaries())
@@ -100,6 +114,35 @@ func (s *Server) handleDashboard(w http.ResponseWriter, _ *http.Request) {
 		"</body></html>"))
 }
 
+func (s *Server) handleDashboardWS(w http.ResponseWriter, r *http.Request) {
+	conn, err := websocket.Accept(w, r, nil)
+	if err != nil {
+		return
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	updates, unsubscribe := s.hub.subscribe()
+	defer unsubscribe()
+
+	if err := wsjson.Write(r.Context(), conn, s.dashboardSnapshot()); err != nil {
+		return
+	}
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case snapshot, ok := <-updates:
+			if !ok {
+				return
+			}
+			if err := wsjson.Write(r.Context(), conn, snapshot); err != nil {
+				return
+			}
+		}
+	}
+}
+
 func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 	conn, err := websocket.Accept(w, r, nil)
 	if err != nil {
@@ -117,6 +160,7 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 		switch event.Type {
 		case "sim_hello":
 			s.store.RecordHello(event.SimID)
+			s.broadcastDashboardSnapshot()
 		case "food_drop":
 			var payload foodDropPayload
 			if err := json.Unmarshal(event.Payload, &payload); err != nil {
@@ -127,6 +171,7 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 				X:      payload.X,
 				Y:      payload.Y,
 			})
+			s.broadcastDashboardSnapshot()
 		case "food_pickup":
 			var payload foodPickupPayload
 			if err := json.Unmarshal(event.Payload, &payload); err != nil {
@@ -135,8 +180,64 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 			s.store.RecordPickup(event.SimID, state.FoodPickup{
 				FoodID: payload.FoodID,
 			})
+			s.broadcastDashboardSnapshot()
 		case "ant_turn_move":
 			s.store.RecordTurnMove(event.SimID)
+			s.broadcastDashboardSnapshot()
 		}
+	}
+}
+
+func newDashboardHub() *dashboardHub {
+	return &dashboardHub{
+		clients: make(map[chan dashboardSnapshot]struct{}),
+	}
+}
+
+func (h *dashboardHub) subscribe() (<-chan dashboardSnapshot, func()) {
+	ch := make(chan dashboardSnapshot, 1)
+
+	h.mu.Lock()
+	h.clients[ch] = struct{}{}
+	h.mu.Unlock()
+
+	return ch, func() {
+		h.mu.Lock()
+		if _, ok := h.clients[ch]; ok {
+			delete(h.clients, ch)
+			close(ch)
+		}
+		h.mu.Unlock()
+	}
+}
+
+func (h *dashboardHub) broadcast(snapshot dashboardSnapshot) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	for ch := range h.clients {
+		select {
+		case ch <- snapshot:
+		default:
+			select {
+			case <-ch:
+			default:
+			}
+			select {
+			case ch <- snapshot:
+			default:
+			}
+		}
+	}
+}
+
+func (s *Server) broadcastDashboardSnapshot() {
+	s.hub.broadcast(s.dashboardSnapshot())
+}
+
+func (s *Server) dashboardSnapshot() dashboardSnapshot {
+	return dashboardSnapshot{
+		Summary: s.store.GlobalSummary(),
+		Sims:    s.store.SimSummaries(),
 	}
 }
