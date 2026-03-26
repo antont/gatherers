@@ -1,6 +1,9 @@
 package state
 
-import "math"
+import (
+	"math"
+	"sync"
+)
 
 type FoodDrop struct {
 	FoodID string
@@ -32,6 +35,7 @@ type simState struct {
 }
 
 type Store struct {
+	mu       sync.RWMutex
 	cellSize float64
 	sims     map[string]*simState
 }
@@ -52,30 +56,47 @@ func NewStore(cellSize float64) *Store {
 }
 
 func (s *Store) RecordDrop(simID string, drop FoodDrop) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	state := s.ensureSim(simID)
 	state.looseFood[drop.FoodID] = foodPosition{X: drop.X, Y: drop.Y}
 	state.dropCount++
 }
 
 func (s *Store) RecordHello(simID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	s.ensureSim(simID)
 }
 
 func (s *Store) RecordPickup(simID string, pickup FoodPickup) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	state := s.ensureSim(simID)
 	delete(state.looseFood, pickup.FoodID)
 	state.pickupCount++
 }
 
 func (s *Store) RecordTurnMove(simID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	state := s.ensureSim(simID)
 	state.turnMoveCount++
 }
 
 func (s *Store) GlobalSummary() Summary {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	positions := s.allLooseFood()
 	if len(positions) == 0 {
-		return Summary{}
+		return Summary{
+			ConnectedSimCount: len(s.sims),
+		}
 	}
 
 	return Summary{
@@ -100,6 +121,9 @@ func (s *Store) ensureSim(simID string) *simState {
 }
 
 func (s *Store) SimSummaries() []SimSummary {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	summaries := make([]SimSummary, 0, len(s.sims))
 	for simID, sim := range s.sims {
 		summaries = append(summaries, SimSummary{
