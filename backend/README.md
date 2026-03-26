@@ -12,6 +12,8 @@ Protocol and scope are defined in `../docs/go-backend-v1-contract.md`.
 
 For a runtime-oriented view of data flow, background aggregation, and dashboard demand handling, see `../docs/go-backend-runtime-architecture.md`.
 
+For one recorded local breakpoint-search run and how to interpret it, see `../docs/go-backend-breakpoint-findings.md`.
+
 ## Layout
 
 - `cmd/server` for the entrypoint
