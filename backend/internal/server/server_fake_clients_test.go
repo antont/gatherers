@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
@@ -17,13 +16,13 @@ import (
 
 func TestFakeClientsPopulatePerSimSummaries(t *testing.T) {
 	srv := New(config.Config{})
-	testServer := httptest.NewServer(srv.Handler())
-	defer testServer.Close()
+	target := newTestTarget(t, srv.Handler())
+	defer target.closeFn()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	sendClientEvents(t, ctx, testServer.URL, []map[string]any{
+	sendClientEvents(t, ctx, target.baseURL, []map[string]any{
 		{
 			"type":         "sim_hello",
 			"sim_id":       "sim-a",
@@ -58,7 +57,7 @@ func TestFakeClientsPopulatePerSimSummaries(t *testing.T) {
 		},
 	})
 
-	sendClientEvents(t, ctx, testServer.URL, []map[string]any{
+	sendClientEvents(t, ctx, target.baseURL, []map[string]any{
 		{
 			"type":         "sim_hello",
 			"sim_id":       "sim-b",
@@ -88,7 +87,7 @@ func TestFakeClientsPopulatePerSimSummaries(t *testing.T) {
 		},
 	})
 
-	resp, err := http.Get(testServer.URL + "/api/sims")
+	resp, err := http.Get(target.baseURL + "/api/sims")
 	if err != nil {
 		t.Fatalf("expected sims endpoint to respond: %v", err)
 	}
@@ -109,8 +108,8 @@ func TestFakeClientsPopulatePerSimSummaries(t *testing.T) {
 		t.Fatalf("expected sims JSON to decode: %v", err)
 	}
 
-	if len(sims) != 2 {
-		t.Fatalf("expected 2 sim summaries, got %d", len(sims))
+	if len(sims) < 2 {
+		t.Fatalf("expected at least 2 sim summaries, got %d", len(sims))
 	}
 
 	slices.SortFunc(sims, func(a, b struct {
@@ -123,12 +122,38 @@ func TestFakeClientsPopulatePerSimSummaries(t *testing.T) {
 		return strings.Compare(a.SimID, b.SimID)
 	})
 
-	if sims[0].SimID != "sim-a" || sims[0].DropCount != 1 || sims[0].TurnMoveCount != 1 || sims[0].LooseFoodCount != 1 {
-		t.Fatalf("unexpected sim-a summary: %+v", sims[0])
+	simAIndex := slices.IndexFunc(sims, func(sim struct {
+		SimID          string `json:"sim_id"`
+		PickupCount    int    `json:"pickup_count"`
+		DropCount      int    `json:"drop_count"`
+		TurnMoveCount  int    `json:"turn_move_count"`
+		LooseFoodCount int    `json:"loose_food_count"`
+	}) bool {
+		return sim.SimID == "sim-a"
+	})
+	if simAIndex == -1 {
+		t.Fatalf("expected sim-a summary to be present, got %+v", sims)
+	}
+	simA := sims[simAIndex]
+	if simA.DropCount != 1 || simA.TurnMoveCount != 1 || simA.LooseFoodCount != 1 {
+		t.Fatalf("unexpected sim-a summary: %+v", simA)
 	}
 
-	if sims[1].SimID != "sim-b" || sims[1].DropCount != 1 || sims[1].PickupCount != 1 || sims[1].LooseFoodCount != 0 {
-		t.Fatalf("unexpected sim-b summary: %+v", sims[1])
+	simBIndex := slices.IndexFunc(sims, func(sim struct {
+		SimID          string `json:"sim_id"`
+		PickupCount    int    `json:"pickup_count"`
+		DropCount      int    `json:"drop_count"`
+		TurnMoveCount  int    `json:"turn_move_count"`
+		LooseFoodCount int    `json:"loose_food_count"`
+	}) bool {
+		return sim.SimID == "sim-b"
+	})
+	if simBIndex == -1 {
+		t.Fatalf("expected sim-b summary to be present, got %+v", sims)
+	}
+	simB := sims[simBIndex]
+	if simB.DropCount != 1 || simB.PickupCount != 1 || simB.LooseFoodCount != 0 {
+		t.Fatalf("unexpected sim-b summary: %+v", simB)
 	}
 }
 

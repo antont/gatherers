@@ -43,6 +43,22 @@ cd backend
 go test -race ./internal/server -run TestStressHundredFakeClients -count=1
 ```
 
+Target a manually running backend instead of `httptest`:
+
+```bash
+cd backend
+GATHERERS_BACKEND_BASE_URL=http://127.0.0.1:18080 \
+go test -race ./internal/server -run TestStressHundredFakeClients -count=1
+```
+
+The fake-client integration test supports the same override:
+
+```bash
+cd backend
+GATHERERS_BACKEND_BASE_URL=http://127.0.0.1:18080 \
+go test ./internal/server -run TestFakeClientsPopulatePerSimSummaries -count=1
+```
+
 ## Running the Rust sim against the backend
 
 Start the Go backend first:

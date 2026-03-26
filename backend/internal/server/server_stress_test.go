@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -20,11 +19,13 @@ func TestStressHundredFakeClients(t *testing.T) {
 	const clientCount = 100
 
 	srv := New(config.Config{})
-	testServer := httptest.NewServer(srv.Handler())
-	defer testServer.Close()
+	target := newTestTarget(t, srv.Handler())
+	defer target.closeFn()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+
+	initialSummary := fetchSummary(t, target.baseURL)
 
 	start := make(chan struct{})
 	errCh := make(chan error, clientCount)
@@ -37,7 +38,7 @@ func TestStressHundredFakeClients(t *testing.T) {
 			<-start
 
 			simID := fmt.Sprintf("sim-%03d", i)
-			err := sendClientEventsErr(ctx, testServer.URL, []map[string]any{
+			err := sendClientEventsErr(ctx, target.baseURL, []map[string]any{
 				{
 					"type":         "sim_hello",
 					"sim_id":       simID,
@@ -73,26 +74,17 @@ func TestStressHundredFakeClients(t *testing.T) {
 		}
 	}
 
-	resp, err := http.Get(testServer.URL + "/api/summary")
-	if err != nil {
-		t.Fatalf("expected summary endpoint to respond: %v", err)
-	}
-	defer resp.Body.Close()
+	finalSummary := fetchSummary(t, target.baseURL)
 
-	var summary struct {
-		ConnectedSimCount int `json:"connected_sim_count"`
-		LooseFoodCount    int `json:"loose_food_count"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&summary); err != nil {
-		t.Fatalf("expected summary JSON to decode: %v", err)
+	connectedDelta := finalSummary.ConnectedSimCount - initialSummary.ConnectedSimCount
+	looseFoodDelta := finalSummary.LooseFoodCount - initialSummary.LooseFoodCount
+
+	if connectedDelta < clientCount {
+		t.Fatalf("expected connected sim count to increase by at least %d, got initial=%d final=%d", clientCount, initialSummary.ConnectedSimCount, finalSummary.ConnectedSimCount)
 	}
 
-	if summary.ConnectedSimCount != clientCount {
-		t.Fatalf("expected %d connected sims after stress run, got %d", clientCount, summary.ConnectedSimCount)
-	}
-
-	if summary.LooseFoodCount != clientCount {
-		t.Fatalf("expected %d loose food items after stress run, got %d", clientCount, summary.LooseFoodCount)
+	if looseFoodDelta < clientCount {
+		t.Fatalf("expected loose food count to increase by at least %d, got initial=%d final=%d", clientCount, initialSummary.LooseFoodCount, finalSummary.LooseFoodCount)
 	}
 }
 
@@ -111,4 +103,27 @@ func sendClientEventsErr(ctx context.Context, baseURL string, events []map[strin
 	}
 
 	return nil
+}
+
+func fetchSummary(t *testing.T, baseURL string) struct {
+	ConnectedSimCount int `json:"connected_sim_count"`
+	LooseFoodCount    int `json:"loose_food_count"`
+} {
+	t.Helper()
+
+	resp, err := http.Get(baseURL + "/api/summary")
+	if err != nil {
+		t.Fatalf("expected summary endpoint to respond: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var summary struct {
+		ConnectedSimCount int `json:"connected_sim_count"`
+		LooseFoodCount    int `json:"loose_food_count"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&summary); err != nil {
+		t.Fatalf("expected summary JSON to decode: %v", err)
+	}
+
+	return summary
 }
