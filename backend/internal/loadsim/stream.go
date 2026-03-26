@@ -237,6 +237,9 @@ func runClient(ctx context.Context, opts RunOptions, index int) error {
 	})
 
 	if err := wsjson.Write(ctx, conn, stream.NextEvent()); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		return err
 	}
 
@@ -249,6 +252,9 @@ func runClient(ctx context.Context, opts RunOptions, index int) error {
 			return ctx.Err()
 		case <-ticker.C:
 			if err := wsjson.Write(ctx, conn, stream.NextEvent()); err != nil {
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
 				return err
 			}
 		}
