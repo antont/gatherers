@@ -2,6 +2,7 @@ use std::sync::{
     Arc, RwLock,
     atomic::{AtomicBool, Ordering},
 };
+use std::time::Instant;
 
 use axum::{
     Json, Router,
@@ -36,6 +37,8 @@ struct AppStateInner {
     dirty: AtomicBool,
     demand_seen: AtomicBool,
     refresh_in_flight: AtomicBool,
+    last_snapshot_copy_micros: std::sync::atomic::AtomicU64,
+    last_snapshot_compute_micros: std::sync::atomic::AtomicU64,
     dashboard_tx: broadcast::Sender<CachedSnapshot>,
 }
 
@@ -50,6 +53,8 @@ impl AppState {
                 dirty: AtomicBool::new(false),
                 demand_seen: AtomicBool::new(false),
                 refresh_in_flight: AtomicBool::new(false),
+                last_snapshot_copy_micros: std::sync::atomic::AtomicU64::new(0),
+                last_snapshot_compute_micros: std::sync::atomic::AtomicU64::new(0),
                 dashboard_tx,
             }),
         }
@@ -89,13 +94,25 @@ impl AppState {
         let state = self.clone();
         tokio::spawn(async move {
             state.inner.dirty.store(false, Ordering::SeqCst);
+            let copy_started = Instant::now();
             let snapshot_data = {
                 state
                     .inner
                     .store
                     .snapshot_data()
             };
-            let snapshot = snapshot_data.into_cached_snapshot();
+            state
+                .inner
+                .last_snapshot_copy_micros
+                .store(copy_started.elapsed().as_micros() as u64, Ordering::SeqCst);
+            let compute_started = Instant::now();
+            let snapshot = tokio::task::spawn_blocking(move || snapshot_data.into_cached_snapshot())
+                .await
+                .expect("snapshot compute task should join");
+            state
+                .inner
+                .last_snapshot_compute_micros
+                .store(compute_started.elapsed().as_micros() as u64, Ordering::SeqCst);
             {
                 let mut snapshot_guard = state
                     .inner
@@ -425,6 +442,76 @@ mod tests {
         assert!(
             write_completed,
             "writing one sim should not block behind unrelated store contention"
+        );
+    }
+
+    #[test]
+    fn heavy_refresh_compute_does_not_starve_runtime_progress() {
+        let (tick_tx, tick_rx) = std::sync::mpsc::channel();
+
+        let runtime_thread = std::thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(1)
+                .enable_time()
+                .build()
+                .expect("test runtime should build");
+            runtime.block_on(async move {
+                let state = AppState::new();
+                state
+                    .apply_event(EventEnvelope {
+                        event_type: "sim_hello".into(),
+                        sim_id: "sim-cpu".into(),
+                        seq: 1,
+                        timestamp_ms: 0,
+                        payload: EventPayload::SimHello(HelloPayload {
+                            sim_name: "sim-cpu".into(),
+                            source: "test".into(),
+                            session_started_ms: 0,
+                            world_width: 1280.0,
+                            world_height: 720.0,
+                            ant_count: 26,
+                            food_count: 5000,
+                        }),
+                    })
+                    .expect("sim hello should be accepted");
+                state
+                    .apply_event(EventEnvelope {
+                        event_type: "sim_food_snapshot".into(),
+                        sim_id: "sim-cpu".into(),
+                        seq: 2,
+                        timestamp_ms: 0,
+                        payload: EventPayload::SimFoodSnapshot(FoodSnapshotPayload {
+                            foods: (0..5000)
+                                .map(|index| StartupFoodPayload {
+                                    food_id: format!("food-{index:04}"),
+                                    x: ((index * 17) % 4000) as f32,
+                                    y: ((index * 19) % 4000) as f32,
+                                })
+                                .collect(),
+                        }),
+                    })
+                    .expect("sim food snapshot should be accepted");
+
+                state.register_api_demand().await;
+                tokio::task::yield_now().await;
+
+                tokio::spawn(async move {
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                    let _ = tick_tx.send(());
+                });
+
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            });
+        });
+
+        let runtime_made_progress = tick_rx.recv_timeout(Duration::from_millis(60)).is_ok();
+        runtime_thread
+            .join()
+            .expect("runtime thread should join after heavy refresh test");
+
+        assert!(
+            runtime_made_progress,
+            "heavy refresh compute should not starve unrelated runtime progress"
         );
     }
 }
