@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -16,15 +15,29 @@ import (
 	"github.com/coder/websocket/wsjson"
 )
 
-func TestSummaryReflectsEventsIngestedOverWebSocket(t *testing.T) {
+func newAPITestTarget(t *testing.T) testTarget {
+	t.Helper()
 	srv := New(config.Config{})
-	testServer := httptest.NewServer(srv.Handler())
-	defer testServer.Close()
+	return newTestTarget(t, srv.Handler())
+}
+
+func TestAPIServerUsesSharedTargetAbstraction(t *testing.T) {
+	target := newAPITestTarget(t)
+	defer target.closeFn()
+
+	if target.baseURL == "" {
+		t.Fatal("expected API tests to resolve a target base URL")
+	}
+}
+
+func TestSummaryReflectsEventsIngestedOverWebSocket(t *testing.T) {
+	target := newAPITestTarget(t)
+	defer target.closeFn()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	wsURL := strings.Replace(testServer.URL, "http://", "ws://", 1) + "/ws/ingest"
+	wsURL := strings.Replace(target.baseURL, "http://", "ws://", 1) + "/ws/ingest"
 	conn, _, err := websocket.Dial(ctx, wsURL, nil)
 	if err != nil {
 		t.Fatalf("expected websocket ingest endpoint to accept connection: %v", err)
@@ -80,7 +93,7 @@ func TestSummaryReflectsEventsIngestedOverWebSocket(t *testing.T) {
 		}
 	}
 
-	summary := waitForSummary(t, testServer.URL, 1500*time.Millisecond, func(summary struct {
+	summary := waitForSummary(t, target.baseURL, 1500*time.Millisecond, func(summary struct {
 		ConnectedSimCount int `json:"connected_sim_count"`
 		LooseFoodCount    int `json:"loose_food_count"`
 	}) bool {
@@ -96,14 +109,13 @@ func TestSummaryReflectsEventsIngestedOverWebSocket(t *testing.T) {
 }
 
 func TestSummaryReadStartsDemandAndEventuallyRefreshesCachedSnapshot(t *testing.T) {
-	srv := New(config.Config{})
-	testServer := httptest.NewServer(srv.Handler())
-	defer testServer.Close()
+	target := newAPITestTarget(t)
+	defer target.closeFn()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	err := loadsim.SendEvents(ctx, testServer.URL, []loadsim.Event{
+	err := loadsim.SendEvents(ctx, target.baseURL, []loadsim.Event{
 		{
 			Type:        "sim_hello",
 			SimID:       "sim-lazy-api",
@@ -131,7 +143,7 @@ func TestSummaryReadStartsDemandAndEventuallyRefreshesCachedSnapshot(t *testing.
 		t.Fatalf("expected ingest events to succeed before demand starts: %v", err)
 	}
 
-	initial := fetchSummary(t, testServer.URL)
+	initial := fetchSummary(t, target.baseURL)
 	if initial.ConnectedSimCount != 0 || initial.LooseFoodCount != 0 {
 		t.Fatalf("expected first summary read to serve stale cached data before demand-driven refresh, got %+v", initial)
 	}
@@ -139,7 +151,7 @@ func TestSummaryReadStartsDemandAndEventuallyRefreshesCachedSnapshot(t *testing.
 	deadline := time.Now().Add(1500 * time.Millisecond)
 	last := initial
 	for time.Now().Before(deadline) {
-		last = fetchSummary(t, testServer.URL)
+		last = fetchSummary(t, target.baseURL)
 		if last.ConnectedSimCount == 1 && last.LooseFoodCount == 1 {
 			return
 		}
@@ -150,14 +162,13 @@ func TestSummaryReadStartsDemandAndEventuallyRefreshesCachedSnapshot(t *testing.
 }
 
 func TestStartupFoodSnapshotSeedsLooseFoodState(t *testing.T) {
-	srv := New(config.Config{})
-	testServer := httptest.NewServer(srv.Handler())
-	defer testServer.Close()
+	target := newAPITestTarget(t)
+	defer target.closeFn()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	wsURL := strings.Replace(testServer.URL, "http://", "ws://", 1) + "/ws/ingest"
+	wsURL := strings.Replace(target.baseURL, "http://", "ws://", 1) + "/ws/ingest"
 	conn, _, err := websocket.Dial(ctx, wsURL, nil)
 	if err != nil {
 		t.Fatalf("expected websocket ingest endpoint to accept connection: %v", err)
@@ -193,7 +204,7 @@ func TestStartupFoodSnapshotSeedsLooseFoodState(t *testing.T) {
 		}
 	}
 
-	sims := waitForSimSummaries(t, testServer.URL, 1500*time.Millisecond, func(sims []simSummaryResponse) bool {
+	sims := waitForSimSummaries(t, target.baseURL, 1500*time.Millisecond, func(sims []simSummaryResponse) bool {
 		return len(sims) == 1 && sims[0].SimID == "sim-startup" && sims[0].LooseFoodCount == 3
 	})
 
@@ -204,7 +215,7 @@ func TestStartupFoodSnapshotSeedsLooseFoodState(t *testing.T) {
 		t.Fatalf("expected startup snapshot to seed 3 loose food items, got %+v", sims[0])
 	}
 
-	summary := waitForSummary(t, testServer.URL, 1500*time.Millisecond, func(summary struct {
+	summary := waitForSummary(t, target.baseURL, 1500*time.Millisecond, func(summary struct {
 		ConnectedSimCount int `json:"connected_sim_count"`
 		LooseFoodCount    int `json:"loose_food_count"`
 	}) bool {
@@ -217,14 +228,13 @@ func TestStartupFoodSnapshotSeedsLooseFoodState(t *testing.T) {
 }
 
 func TestSummaryIncludesElapsedTimeAndEventRate(t *testing.T) {
-	srv := New(config.Config{})
-	testServer := httptest.NewServer(srv.Handler())
-	defer testServer.Close()
+	target := newAPITestTarget(t)
+	defer target.closeFn()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	wsURL := strings.Replace(testServer.URL, "http://", "ws://", 1) + "/ws/ingest"
+	wsURL := strings.Replace(target.baseURL, "http://", "ws://", 1) + "/ws/ingest"
 	conn, _, err := websocket.Dial(ctx, wsURL, nil)
 	if err != nil {
 		t.Fatalf("expected websocket ingest endpoint to accept connection: %v", err)
@@ -260,7 +270,7 @@ func TestSummaryIncludesElapsedTimeAndEventRate(t *testing.T) {
 		}
 	}
 
-	summary := waitForExtendedSummary(t, testServer.URL, 1500*time.Millisecond, func(summary struct {
+	summary := waitForExtendedSummary(t, target.baseURL, 1500*time.Millisecond, func(summary struct {
 		ElapsedSeconds  float64 `json:"elapsed_seconds"`
 		EventsPerSecond float64 `json:"events_per_second"`
 	}) bool {
@@ -276,14 +286,13 @@ func TestSummaryIncludesElapsedTimeAndEventRate(t *testing.T) {
 }
 
 func TestSimHelloAntCountAppearsInPerSimSummary(t *testing.T) {
-	srv := New(config.Config{})
-	testServer := httptest.NewServer(srv.Handler())
-	defer testServer.Close()
+	target := newAPITestTarget(t)
+	defer target.closeFn()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	wsURL := strings.Replace(testServer.URL, "http://", "ws://", 1) + "/ws/ingest"
+	wsURL := strings.Replace(target.baseURL, "http://", "ws://", 1) + "/ws/ingest"
 	conn, _, err := websocket.Dial(ctx, wsURL, nil)
 	if err != nil {
 		t.Fatalf("expected websocket ingest endpoint to accept connection: %v", err)
@@ -305,7 +314,7 @@ func TestSimHelloAntCountAppearsInPerSimSummary(t *testing.T) {
 		t.Fatalf("expected sim_hello to be accepted over websocket: %v", err)
 	}
 
-	sims := waitForSimSummaries(t, testServer.URL, 1500*time.Millisecond, func(sims []simSummaryResponse) bool {
+	sims := waitForSimSummaries(t, target.baseURL, 1500*time.Millisecond, func(sims []simSummaryResponse) bool {
 		return len(sims) == 1 && sims[0].SimID == "sim-meta" && sims[0].AntCount == 26
 	})
 
@@ -315,14 +324,13 @@ func TestSimHelloAntCountAppearsInPerSimSummary(t *testing.T) {
 }
 
 func TestDashboardShowsConnectedSimAndLooseFoodCounts(t *testing.T) {
-	srv := New(config.Config{})
-	testServer := httptest.NewServer(srv.Handler())
-	defer testServer.Close()
+	target := newAPITestTarget(t)
+	defer target.closeFn()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	wsURL := strings.Replace(testServer.URL, "http://", "ws://", 1) + "/ws/ingest"
+	wsURL := strings.Replace(target.baseURL, "http://", "ws://", 1) + "/ws/ingest"
 	conn, _, err := websocket.Dial(ctx, wsURL, nil)
 	if err != nil {
 		t.Fatalf("expected websocket ingest endpoint to accept connection: %v", err)
@@ -356,7 +364,7 @@ func TestDashboardShowsConnectedSimAndLooseFoodCounts(t *testing.T) {
 		}
 	}
 
-	resp, err := http.Get(testServer.URL + "/")
+	resp, err := http.Get(target.baseURL + "/")
 	if err != nil {
 		t.Fatalf("expected dashboard endpoint to respond: %v", err)
 	}
@@ -467,11 +475,10 @@ func waitForSimSummaries(t *testing.T, baseURL string, timeout time.Duration, ma
 }
 
 func TestDashboardPageBootstrapsRealtimeWebsocketUi(t *testing.T) {
-	srv := New(config.Config{})
-	testServer := httptest.NewServer(srv.Handler())
-	defer testServer.Close()
+	target := newAPITestTarget(t)
+	defer target.closeFn()
 
-	resp, err := http.Get(testServer.URL + "/")
+	resp, err := http.Get(target.baseURL + "/")
 	if err != nil {
 		t.Fatalf("expected dashboard endpoint to respond: %v", err)
 	}
