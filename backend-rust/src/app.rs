@@ -110,12 +110,15 @@ impl AppState {
     fn spawn_refresh(&self) {
         let state = self.clone();
         tokio::spawn(async move {
-            let snapshot = state
-                .inner
-                .store
-                .read()
-                .expect("store lock poisoned")
-                .snapshot();
+            let snapshot_data = {
+                state
+                    .inner
+                    .store
+                    .read()
+                    .expect("store lock poisoned")
+                    .snapshot_data()
+            };
+            let snapshot = snapshot_data.into_cached_snapshot();
             {
                 let mut snapshot_guard = state
                     .inner
@@ -224,5 +227,94 @@ async fn handle_dashboard_socket(state: AppState, mut socket: WebSocket) {
         {
             return;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        sync::TryLockError,
+        time::{Duration, Instant},
+    };
+
+    use super::AppState;
+    use crate::protocol::{
+        EventEnvelope, EventPayload, FoodSnapshotPayload, HelloPayload, StartupFoodPayload,
+    };
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn refresh_does_not_hold_store_lock_long_enough_to_starve_writes() {
+        let state = AppState::new();
+        state
+            .apply_event(EventEnvelope {
+                event_type: "sim_hello".into(),
+                sim_id: "sim-lock".into(),
+                seq: 1,
+                timestamp_ms: 0,
+                payload: EventPayload::SimHello(HelloPayload {
+                    sim_name: "sim-lock".into(),
+                    source: "test".into(),
+                    session_started_ms: 0,
+                    world_width: 1280.0,
+                    world_height: 720.0,
+                    ant_count: 26,
+                    food_count: 5000,
+                }),
+            })
+            .expect("sim_hello should be accepted");
+        state
+            .apply_event(EventEnvelope {
+                event_type: "sim_food_snapshot".into(),
+                sim_id: "sim-lock".into(),
+                seq: 2,
+                timestamp_ms: 0,
+                payload: EventPayload::SimFoodSnapshot(FoodSnapshotPayload {
+                    foods: (0..5000)
+                        .map(|index| StartupFoodPayload {
+                            food_id: format!("food-{index:04}"),
+                            x: ((index * 17) % 4000) as f32,
+                            y: ((index * 19) % 4000) as f32,
+                        })
+                        .collect(),
+                }),
+            })
+            .expect("sim_food_snapshot should be accepted");
+
+        state.register_api_demand();
+
+        let blocked_for = tokio::task::spawn_blocking({
+            let state = state.clone();
+            move || {
+                let deadline = Instant::now() + Duration::from_secs(5);
+                let mut blocked_since: Option<Instant> = None;
+                loop {
+                    match state.inner.store.try_write() {
+                        Ok(guard) => {
+                            drop(guard);
+                            if let Some(started_at) = blocked_since {
+                                return started_at.elapsed();
+                            }
+                        }
+                        Err(TryLockError::WouldBlock) => {
+                            blocked_since.get_or_insert_with(Instant::now);
+                        }
+                        Err(TryLockError::Poisoned(_)) => panic!("store lock should not poison"),
+                    }
+                    assert!(
+                        Instant::now() < deadline,
+                        "expected refresh to briefly block writes and then release the store lock"
+                    );
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+            }
+        })
+        .await
+        .expect("lock timing task should join");
+
+        assert!(
+            blocked_for < Duration::from_millis(25),
+            "expected refresh to release the store lock quickly, but writes were blocked for {:?}",
+            blocked_for
+        );
     }
 }

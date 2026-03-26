@@ -29,7 +29,7 @@ pub struct Store {
 }
 
 #[derive(Clone, Debug, Default)]
-struct DashboardSnapshotData {
+pub(crate) struct DashboardSnapshotData {
     sims: Vec<SimSummaryResponse>,
     loose_food: Vec<FoodPosition>,
     started_at: Option<Instant>,
@@ -90,11 +90,7 @@ impl Store {
     }
 
     pub fn snapshot(&self) -> CachedSnapshot {
-        let data = self.dashboard_snapshot_data();
-        CachedSnapshot {
-            summary: data.summary(),
-            sims: data.sims,
-        }
+        self.snapshot_data().into_cached_snapshot()
     }
 
     fn ensure_sim(&mut self, sim_id: &str) -> &mut SimState {
@@ -121,7 +117,7 @@ impl Store {
         state.drop_count += 1;
     }
 
-    fn dashboard_snapshot_data(&self) -> DashboardSnapshotData {
+    pub(crate) fn snapshot_data(&self) -> DashboardSnapshotData {
         let mut sims = Vec::with_capacity(self.sims.len());
         let mut loose_food = Vec::new();
         let mut started_at = None;
@@ -196,6 +192,13 @@ impl DashboardSnapshotData {
             return (0.0, 0.0);
         }
         (elapsed_seconds, self.total_events as f64 / elapsed_seconds)
+    }
+
+    pub(crate) fn into_cached_snapshot(self) -> CachedSnapshot {
+        CachedSnapshot {
+            summary: self.summary(),
+            sims: self.sims,
+        }
     }
 }
 

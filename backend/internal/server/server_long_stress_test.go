@@ -103,6 +103,59 @@ func TestFindBreakpointUnderRampLoad(t *testing.T) {
 	t.Logf("no breakpoint found up to %s", describeBreakpointResult(report.LastGood))
 }
 
+func TestExternalBackendRampLoadKeepsAPISimsResponsive(t *testing.T) {
+	if os.Getenv("GATHERERS_RUN_EXTERNAL_BREAKPOINT_REGRESSION") == "" {
+		t.Skip("set GATHERERS_RUN_EXTERNAL_BREAKPOINT_REGRESSION=1 to run the external backend regression ramp")
+	}
+	if os.Getenv("GATHERERS_BACKEND_BASE_URL") == "" {
+		t.Skip("set GATHERERS_BACKEND_BASE_URL to target an external backend")
+	}
+
+	target := newTestTarget(t, http.NewServeMux())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	base := loadsim.BreakpointStep{
+		BaseURL:           target.baseURL,
+		SimIDPrefix:       "external-regression",
+		ActivityTriplets:  20,
+		InitialAntCount:   26,
+		InitialFoodCount:  80,
+		SendTimeout:       10 * time.Second,
+		SettleTimeout:     10 * time.Second,
+		StallTimeout:      2 * time.Second,
+		ProgressPollEvery: 100 * time.Millisecond,
+	}
+	report, err := loadsim.RunBreakpointSearch(ctx, loadsim.BreakpointSearchConfig{
+		Steps:   loadsim.BuildClientCountRamp(100, 110, 5, base),
+		RunStep: loadsim.RunBackendBreakpointStep,
+	})
+	if err != nil {
+		t.Fatalf("expected external breakpoint regression ramp to complete cleanly: %v", err)
+	}
+
+	if report.LastGood == nil || report.LastGood.Step.ClientCount < 100 {
+		t.Fatalf(
+			"expected external backend to stay exact through 100 clients, got last_good=%v first_bad=%v",
+			describeBreakpointResult(report.LastGood),
+			describeBreakpointResult(report.FirstBad),
+		)
+	}
+	if report.FirstBad != nil && report.FirstBad.Step.ClientCount <= 100 {
+		t.Fatalf(
+			"external backend regressed too early at client_count=%d after last_good=%v: reason=%s message=%s expected=%+v observed=%+v client_errors=%v",
+			report.FirstBad.Step.ClientCount,
+			describeBreakpointResult(report.LastGood),
+			report.FirstBad.Failure.Kind,
+			report.FirstBad.Failure.Message,
+			report.FirstBad.Expected,
+			report.FirstBad.Observed,
+			report.FirstBad.Failure.ClientErrors,
+		)
+	}
+}
+
 func describeBreakpointResult(result *loadsim.BreakpointStepResult) string {
 	if result == nil {
 		return "none"

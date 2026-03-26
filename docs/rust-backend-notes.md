@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This note explains the current Rust backend direction, why the stack was chosen, how it compares with the Go backend, and where the transport seam for future raw TCP now lives.
+This note explains the current Rust backend direction, why the stack was chosen, how it compares with the Go backend, where the transport seam for future raw TCP now lives, and how the snapshot path was decoupled from ingest after reproducing the first heavy-load failure mode.
 
 ## Library Choices
 
@@ -64,6 +64,43 @@ but not:
 - store mutation logic
 - snapshot invalidation logic
 
+## Snapshot Decoupling
+
+The first Rust parity version repeated the same architectural mistake the Go backend originally had in milder form:
+
+- ingest writes took the store write lock
+- demand-driven refresh took the store read lock
+- while still holding that read lock, refresh computed expensive derived metrics such as nearest-neighbor distance
+
+That meant refresh could block writers for far longer than the cheap raw-state copy itself required.
+
+The current snapshot path now matches the fixed Go shape more closely:
+
+1. ingest mutates raw state and marks cached data dirty
+2. a demand-triggered refresh task takes the store read lock only long enough to copy `DashboardSnapshotData`
+3. the read lock is released
+4. expensive derived metrics are computed from that copied data
+5. the cached snapshot is replaced and broadcast to dashboard watchers
+
+This keeps the public HTTP and WebSocket contract the same, while removing the long lock hold that previously starved writes under load.
+
+## Failure Reproduction And Evidence
+
+Two new regressions were added specifically around this issue:
+
+- `backend-rust/src/app.rs`: `refresh_does_not_hold_store_lock_long_enough_to_starve_writes`
+- `backend-rust/tests/ingest_decoupling_stress.rs`: `heavy_ingest_with_polling_keeps_api_sims_responsive_and_exact`
+
+Before the refactor, the targeted lock test showed a single refresh blocking writes for roughly half a second on a large snapshot. The first heavy-load regression also failed while `/api/sims` polling was active.
+
+The shared Go breakpoint harness was then rerun against a fresh Rust backend process. That changed the observed behavior from an API timeout-style collapse at the first heavy step to:
+
+- exact through `100` clients in the reused Go exact-count stress test
+- exact through `100` clients in the reused Go breakpoint regression ramp
+- first observed breakpoint moving up to `105` clients, and presenting as an exact-count mismatch rather than `/api/sims` timing out
+
+That does not mean the Rust backend has no breakpoint. It means the specific ingest-vs-refresh lock coupling that originally caused request starvation was removed, and the next remaining limit now appears as ordinary throughput capacity instead.
+
 ## Raw TCP Status
 
 Raw TCP is intentionally deferred.
@@ -85,15 +122,12 @@ Planned direction for later:
 
 ### Go tests reused unchanged against Rust
 
-These external black-box tests were verified against the Rust backend by setting `GATHERERS_BACKEND_BASE_URL`:
+These external black-box tests were verified against fresh Rust backend instances by setting `GATHERERS_BACKEND_BASE_URL`:
 
-- `TestSummaryReflectsEventsIngestedOverWebSocket`
-- `TestDashboardPageBootstrapsRealtimeWebsocketUi`
-- `TestDashboardWebsocketReceivesUpdatedSnapshotAfterIngest`
 - `TestDashboardWebsocketStartsWithCachedSnapshotThenCatchesUp`
-- `TestFakeClientsPopulatePerSimSummaries`
+- `TestSummaryReadStartsDemandAndEventuallyRefreshesCachedSnapshot`
 - `TestStressHundredFakeClientsDeliversExactEventTotals`
-- `TestFindBreakpointUnderRampLoad` with a small ramp config
+- `TestExternalBackendRampLoadKeepsAPISimsResponsive`
 
 ### What required adaptation
 
@@ -115,17 +149,18 @@ The Go backend already has a recorded local breakpoint note in `docs/go-backend-
 
 ### Rust backend
 
-The Rust backend has currently been verified at two levels:
+The Rust backend now has stronger post-fix evidence:
 
-- focused black-box Go tests pass against it
-- the Go exact-count stress test with `100` fake clients passes against it
-- the Go breakpoint wrapper passes in a small smoke configuration up to `4` clients
+- full Rust test suite passes locally
+- reused Go lazy-refresh API and dashboard tests pass against fresh Rust backend instances
+- the reused Go exact-count `100` fake-client stress test passes against a fresh Rust backend instance
+- the reused Go breakpoint regression ramp now proves exact behavior through `100` clients and sees the first bad step at `105`
 
-That means the Rust backend is already compatible enough for apples-to-apples harness reuse, but it does **not** yet have a heavy breakpoint characterization comparable to the Go backend note.
+That means the Rust backend is compatible enough for apples-to-apples harness reuse and is clear of the original request-starvation failure mode, but it still has a lower heavy-load breakpoint than the Go backend on this machine.
 
 ## Remaining Gaps Before Raw TCP
 
-- run the same larger breakpoint search against Rust that was already recorded for Go
+- run and record a fuller Rust breakpoint characterization comparable to `docs/go-backend-breakpoint-findings.md`
 - decide whether the Rust backend should copy the Go adaptive cadence exactly or only semantically
 - decide whether external Go test reuse should eventually spawn fresh Rust processes automatically for zero-state-sensitive tests
 - add a documented native-only TCP framing choice
