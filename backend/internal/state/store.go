@@ -71,6 +71,17 @@ func (s *Store) RecordHello(simID string) {
 	s.ensureSim(simID)
 }
 
+func (s *Store) RecordFoodSnapshot(simID string, foods []FoodDrop) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	state := s.ensureSim(simID)
+	state.looseFood = make(map[string]foodPosition, len(foods))
+	for _, food := range foods {
+		state.looseFood[food.FoodID] = foodPosition{X: food.X, Y: food.Y}
+	}
+}
+
 func (s *Store) RecordPickup(simID string, pickup FoodPickup) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

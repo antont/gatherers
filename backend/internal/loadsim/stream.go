@@ -19,6 +19,8 @@ type ClientOptions struct {
 	StartY    float64
 	StartFood string
 	StartAnt  string
+	InitialAntCount int
+	InitialFoodCount int
 	Interval  time.Duration
 }
 
@@ -36,6 +38,8 @@ type RunOptions struct {
 	Duration    time.Duration
 	Interval    time.Duration
 	Seed        int64
+	InitialAntCount int
+	InitialFoodCount int
 	SimIDPrefix string
 }
 
@@ -46,6 +50,10 @@ type ClientEventStream struct {
 	x           float64
 	y           float64
 	step        int
+	foodIDs     []string
+	foodIndex   int
+	antIDs      []string
+	antIndex    int
 }
 
 func NewClientEventStream(opts ClientOptions) *ClientEventStream {
@@ -58,6 +66,12 @@ func NewClientEventStream(opts ClientOptions) *ClientEventStream {
 	if opts.StartAnt == "" {
 		opts.StartAnt = opts.SimID + "-ant"
 	}
+	if opts.InitialAntCount <= 0 {
+		opts.InitialAntCount = 26
+	}
+	if opts.InitialFoodCount <= 0 {
+		opts.InitialFoodCount = 80
+	}
 	if opts.Interval <= 0 {
 		opts.Interval = 20 * time.Millisecond
 	}
@@ -67,6 +81,8 @@ func NewClientEventStream(opts ClientOptions) *ClientEventStream {
 		timestampMS: 1_000 + opts.Seed,
 		x:           opts.StartX,
 		y:           opts.StartY,
+		antIDs:      buildAntIDs(opts.StartAnt, opts.InitialAntCount),
+		foodIDs:     buildFoodIDs(opts.StartFood, opts.InitialFoodCount),
 	}
 }
 
@@ -102,18 +118,28 @@ func (s *ClientEventStream) NextEvent() Event {
 			},
 		}
 	}
-
-	switch s.step % 3 {
-	case 0:
-		event := Event{
-			Type:        "food_drop",
+	if s.seq == 2 {
+		return Event{
+			Type:        "sim_food_snapshot",
 			SimID:       s.opts.SimID,
 			Seq:         s.seq,
 			TimestampMS: s.timestampMS,
 			Payload: map[string]any{
-				"food_id": s.opts.StartFood,
-				"x":       s.x,
-				"y":       s.y,
+				"foods": buildStartupFoods(s.foodIDs, s.opts.StartX, s.opts.StartY),
+			},
+		}
+	}
+
+	switch s.step % 3 {
+	case 0:
+		event := Event{
+			Type:        "food_pickup",
+			SimID:       s.opts.SimID,
+			Seq:         s.seq,
+			TimestampMS: s.timestampMS,
+			Payload: map[string]any{
+				"food_id": s.currentFoodID(),
+				"ant_id":  s.currentAntID(),
 			},
 		}
 		s.step++
@@ -127,7 +153,7 @@ func (s *ClientEventStream) NextEvent() Event {
 			Seq:         s.seq,
 			TimestampMS: s.timestampMS,
 			Payload: map[string]any{
-				"ant_id":       s.opts.StartAnt,
+				"ant_id":       s.currentAntID(),
 				"x":            s.x,
 				"y":            s.y,
 				"direction_x":  1.0,
@@ -139,14 +165,19 @@ func (s *ClientEventStream) NextEvent() Event {
 		return event
 	default:
 		event := Event{
-			Type:        "food_pickup",
+			Type:        "food_drop",
 			SimID:       s.opts.SimID,
 			Seq:         s.seq,
 			TimestampMS: s.timestampMS,
 			Payload: map[string]any{
-				"food_id": s.opts.StartFood,
+				"food_id": s.currentFoodID(),
+				"ant_id":  s.currentAntID(),
+				"x":       s.x,
+				"y":       s.y,
 			},
 		}
+		s.foodIndex++
+		s.antIndex++
 		s.step++
 		return event
 	}
@@ -178,6 +209,12 @@ func Run(ctx context.Context, opts RunOptions) error {
 	}
 	if opts.SimIDPrefix == "" {
 		opts.SimIDPrefix = "sim"
+	}
+	if opts.InitialFoodCount <= 0 {
+		opts.InitialFoodCount = 80
+	}
+	if opts.InitialAntCount <= 0 {
+		opts.InitialAntCount = 26
 	}
 
 	runCtx := ctx
@@ -233,6 +270,8 @@ func runClient(ctx context.Context, opts RunOptions, index int) error {
 		StartY:    float64(index),
 		StartFood: fmt.Sprintf("%s-food-%03d", opts.SimIDPrefix, index),
 		StartAnt:  fmt.Sprintf("%s-ant-%03d", opts.SimIDPrefix, index),
+		InitialAntCount: opts.InitialAntCount,
+		InitialFoodCount: opts.InitialFoodCount,
 		Interval:  opts.Interval,
 	})
 
@@ -259,4 +298,54 @@ func runClient(ctx context.Context, opts RunOptions, index int) error {
 			}
 		}
 	}
+}
+
+func (s *ClientEventStream) currentFoodID() string {
+	return s.foodIDs[s.foodIndex%len(s.foodIDs)]
+}
+
+func (s *ClientEventStream) currentAntID() string {
+	return s.antIDs[s.antIndex%len(s.antIDs)]
+}
+
+func buildAntIDs(base string, count int) []string {
+	if count <= 1 {
+		return []string{base}
+	}
+
+	ids := make([]string, 0, count)
+	for i := 0; i < count; i++ {
+		ids = append(ids, fmt.Sprintf("%s-%03d", base, i))
+	}
+	return ids
+}
+
+func buildFoodIDs(base string, count int) []string {
+	if count <= 1 {
+		return []string{base}
+	}
+
+	ids := make([]string, 0, count)
+	for i := 0; i < count; i++ {
+		ids = append(ids, fmt.Sprintf("%s-%03d", base, i))
+	}
+	return ids
+}
+
+func buildStartupFoods(foodIDs []string, startX, startY float64) []map[string]any {
+	foods := make([]map[string]any, 0, len(foodIDs))
+	for i, foodID := range foodIDs {
+		cluster := i % 5
+		ring := i / 5
+		baseX := startX + float64(cluster*120)
+		baseY := startY + float64((cluster%3)*90)
+		offsetX := float64((ring%3)*9 - 9)
+		offsetY := float64((ring/3)*9 - 9)
+		foods = append(foods, map[string]any{
+			"food_id": foodID,
+			"x":       baseX + offsetX,
+			"y":       baseY + offsetY,
+		})
+	}
+	return foods
 }

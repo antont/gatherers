@@ -84,6 +84,10 @@ type foodPickupPayload struct {
 	FoodID string `json:"food_id"`
 }
 
+type foodSnapshotPayload struct {
+	Foods []foodDropPayload `json:"foods"`
+}
+
 type dashboardSnapshot struct {
 	Summary state.Summary      `json:"summary"`
 	Sims    []state.SimSummary `json:"sims"`
@@ -315,6 +319,21 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 		switch event.Type {
 		case "sim_hello":
 			s.store.RecordHello(event.SimID)
+			s.broadcastDashboardSnapshot()
+		case "sim_food_snapshot":
+			var payload foodSnapshotPayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				return
+			}
+			foods := make([]state.FoodDrop, 0, len(payload.Foods))
+			for _, food := range payload.Foods {
+				foods = append(foods, state.FoodDrop{
+					FoodID: food.FoodID,
+					X:      food.X,
+					Y:      food.Y,
+				})
+			}
+			s.store.RecordFoodSnapshot(event.SimID, foods)
 			s.broadcastDashboardSnapshot()
 		case "food_drop":
 			var payload foodDropPayload

@@ -106,6 +106,90 @@ func TestSummaryReflectsEventsIngestedOverWebSocket(t *testing.T) {
 	}
 }
 
+func TestStartupFoodSnapshotSeedsLooseFoodState(t *testing.T) {
+	srv := New(config.Config{})
+	testServer := httptest.NewServer(srv.Handler())
+	defer testServer.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	wsURL := strings.Replace(testServer.URL, "http://", "ws://", 1) + "/ws/ingest"
+	conn, _, err := websocket.Dial(ctx, wsURL, nil)
+	if err != nil {
+		t.Fatalf("expected websocket ingest endpoint to accept connection: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	events := []map[string]any{
+		{
+			"type":         "sim_hello",
+			"sim_id":       "sim-startup",
+			"seq":          1,
+			"timestamp_ms": 1000,
+			"payload":      map[string]any{"sim_name": "startup"},
+		},
+		{
+			"type":         "sim_food_snapshot",
+			"sim_id":       "sim-startup",
+			"seq":          2,
+			"timestamp_ms": 1001,
+			"payload": map[string]any{
+				"foods": []map[string]any{
+					{"food_id": "food-1", "x": 10.0, "y": 20.0},
+					{"food_id": "food-2", "x": 30.0, "y": 40.0},
+					{"food_id": "food-3", "x": 50.0, "y": 60.0},
+				},
+			},
+		},
+	}
+
+	for _, event := range events {
+		if err := wsjson.Write(ctx, conn, event); err != nil {
+			t.Fatalf("expected event %#v to be accepted over websocket: %v", event["type"], err)
+		}
+	}
+
+	resp, err := http.Get(testServer.URL + "/api/sims")
+	if err != nil {
+		t.Fatalf("expected sims endpoint to respond: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var sims []struct {
+		SimID          string `json:"sim_id"`
+		LooseFoodCount int    `json:"loose_food_count"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&sims); err != nil {
+		t.Fatalf("expected sims JSON to decode: %v", err)
+	}
+
+	if len(sims) != 1 {
+		t.Fatalf("expected one sim summary, got %d", len(sims))
+	}
+	if sims[0].SimID != "sim-startup" || sims[0].LooseFoodCount != 3 {
+		t.Fatalf("expected startup snapshot to seed 3 loose food items, got %+v", sims[0])
+	}
+
+	resp, err = http.Get(testServer.URL + "/api/summary")
+	if err != nil {
+		t.Fatalf("expected summary endpoint to respond: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var summary struct {
+		ConnectedSimCount int `json:"connected_sim_count"`
+		LooseFoodCount    int `json:"loose_food_count"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&summary); err != nil {
+		t.Fatalf("expected summary JSON to decode: %v", err)
+	}
+
+	if summary.ConnectedSimCount != 1 || summary.LooseFoodCount != 3 {
+		t.Fatalf("expected startup snapshot to count as 3 loose food items, got %+v", summary)
+	}
+}
+
 func TestDashboardShowsConnectedSimAndLooseFoodCounts(t *testing.T) {
 	srv := New(config.Config{})
 	testServer := httptest.NewServer(srv.Handler())

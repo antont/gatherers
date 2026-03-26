@@ -97,9 +97,16 @@ go run ./cmd/fakeclients \
   --clients 100 \
   --duration 20s \
   --interval 100ms \
+  --startup-food-count 80 \
   --seed 1 \
   --sim-id-prefix demo
 ```
+
+Each fake client now sends:
+
+- `sim_hello`
+- `sim_food_snapshot` with its startup loose-food positions
+- then ongoing mixed `food_pickup`, `ant_turn_move`, and `food_drop` events
 
 The dashboard should show:
 
@@ -123,6 +130,12 @@ Then, in the repo root, enable backend mode for the Rust sim:
 ```bash
 GATHERERS_BACKEND_WS_URL=ws://127.0.0.1:8080/ws/ingest cargo run
 ```
+
+When backend mode is enabled, the Rust sim sends:
+
+- `sim_hello` once at startup
+- `sim_food_snapshot` immediately after hello with all current loose-food positions
+- collision-driven pickup/drop/turn events after that
 
 If `GATHERERS_BACKEND_WS_URL` is unset, the Bevy sim runs standalone and does not try to connect.
 

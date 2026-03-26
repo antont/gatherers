@@ -20,6 +20,7 @@ impl Plugin for BackendClientPlugin {
                 PostUpdate,
                 (
                     queue_backend_hello_event,
+                    queue_backend_food_snapshot_event,
                     collect_backend_events,
                     flush_backend_events,
                 )
@@ -85,6 +86,7 @@ struct BackendConnectionState {
     receiver: Option<WsReceiver>,
     opened: bool,
     hello_queued: bool,
+    food_snapshot_queued: bool,
 }
 
 #[derive(Message, Clone, Debug)]
@@ -136,6 +138,18 @@ struct HelloPayload {
     world_height: f32,
     ant_count: usize,
     food_count: usize,
+}
+
+#[derive(Serialize)]
+struct FoodSnapshotPayload {
+    foods: Vec<StartupFoodPayload>,
+}
+
+#[derive(Serialize)]
+struct StartupFoodPayload {
+    food_id: String,
+    x: f32,
+    y: f32,
 }
 
 #[derive(Serialize)]
@@ -199,6 +213,43 @@ fn queue_backend_hello_event(
             connection.hello_queued = true;
         }
         Err(err) => error!("Failed to serialize sim_hello event: {err}"),
+    }
+}
+
+fn queue_backend_food_snapshot_event(
+    config: Res<BackendClientConfig>,
+    mut pending: ResMut<PendingBackendEvents>,
+    mut sequence: ResMut<BackendSequence>,
+    mut connection: NonSendMut<BackendConnectionState>,
+    food_query: Query<(Entity, &Transform), (With<Food>, Without<ChildOf>)>,
+) {
+    if !config.is_enabled() || !connection.hello_queued || connection.food_snapshot_queued {
+        return;
+    }
+
+    let foods = food_query
+        .iter()
+        .map(|(entity, transform)| StartupFoodPayload {
+            food_id: entity.to_bits().to_string(),
+            x: transform.translation.x,
+            y: transform.translation.y,
+        })
+        .collect();
+
+    let envelope = EventEnvelope {
+        event_type: "sim_food_snapshot",
+        sim_id: config.sim_id.clone(),
+        seq: next_sequence(&mut sequence),
+        timestamp_ms: 0,
+        payload: FoodSnapshotPayload { foods },
+    };
+
+    match serde_json::to_string(&envelope) {
+        Ok(json) => {
+            pending.push(json);
+            connection.food_snapshot_queued = true;
+        }
+        Err(err) => error!("Failed to serialize sim_food_snapshot event: {err}"),
     }
 }
 

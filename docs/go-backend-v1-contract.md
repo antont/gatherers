@@ -47,6 +47,8 @@ Recommended hello payload fields:
 - `ant_count`
 - `food_count`
 
+Immediately after `sim_hello`, the client may send a startup snapshot message containing all currently loose food positions. This gives the backend an initial world view without waiting for later pickup/drop events.
+
 ## Transport
 
 ### WebSocket ingest
@@ -116,6 +118,26 @@ Payload:
   "food_count": 80
 }
 ```
+
+### `sim_food_snapshot`
+
+Sent once immediately after `sim_hello` to seed the backend with the loose food currently on the ground.
+
+Payload:
+
+```json
+{
+  "foods": [
+    { "food_id": "food-1", "x": 412.5, "y": 218.0 },
+    { "food_id": "food-2", "x": 398.0, "y": 227.5 }
+  ]
+}
+```
+
+Server effect:
+
+- replace the sim's currently known loose-food positions with the provided snapshot
+- do not count the snapshot itself as pickup/drop activity
 
 ### `sim_heartbeat`
 
