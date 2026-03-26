@@ -13,7 +13,9 @@ Protocol and scope are defined in `../docs/go-backend-v1-contract.md`.
 ## Layout
 
 - `cmd/server` for the entrypoint
+- `cmd/fakeclients` for long-lived manual load generation against a live backend
 - `internal/config` for runtime configuration
+- `internal/loadsim` for reusable fake-client streams and runners shared by tests and commands
 - `internal/server` for HTTP and WebSocket wiring
 - `internal/state` for aggregate state logic
 - `internal/ingest` reserved for further ingest-specific code
@@ -34,6 +36,14 @@ Run the backend test suite:
 ```bash
 cd backend
 go test ./...
+```
+
+Fast CI-safe backend checks:
+
+```bash
+cd backend
+go test ./...
+go test -race ./internal/server -run TestStressHundredFakeClients -count=1
 ```
 
 Run the race-checked stress slice:
@@ -58,6 +68,46 @@ cd backend
 GATHERERS_BACKEND_BASE_URL=http://127.0.0.1:18080 \
 go test ./internal/server -run TestFakeClientsPopulatePerSimSummaries -count=1
 ```
+
+Run the opt-in sustained load coverage:
+
+```bash
+cd backend
+GATHERERS_RUN_LONG_STRESS=1 \
+go test ./internal/server -run TestLongStressDashboardReflectsSustainedLoad -count=1
+```
+
+## Realtime dashboard demo
+
+Start the backend on a known port:
+
+```bash
+cd backend
+GATHERERS_BACKEND_ADDR=:18080 go run ./cmd/server
+```
+
+Then open [`http://127.0.0.1:18080`](http://127.0.0.1:18080) in a browser. The page now subscribes to `/ws/dashboard` and updates live without reload.
+
+Drive realistic long-lived fake traffic from a second terminal:
+
+```bash
+cd backend
+go run ./cmd/fakeclients \
+  --base-url http://127.0.0.1:18080 \
+  --clients 100 \
+  --duration 20s \
+  --interval 100ms \
+  --seed 1 \
+  --sim-id-prefix demo
+```
+
+The dashboard should show:
+
+- the connected sim count climbing toward the requested client count
+- loose food and clustering metrics changing over time
+- the per-sim table updating while load is still running
+
+For a smaller local smoke demo, lower `--clients` or shorten `--duration`.
 
 ## Running the Rust sim against the backend
 
@@ -111,3 +161,5 @@ The existing commit history on this branch follows that pattern for:
 - dashboard behavior
 - fake-client integration
 - concurrent stress handling
+- realtime dashboard updates
+- sustained opt-in load coverage
