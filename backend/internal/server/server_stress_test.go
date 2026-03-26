@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -309,4 +311,56 @@ func fetchSummary(t *testing.T, baseURL string) struct {
 	}
 
 	return summary
+}
+
+func buildBreakpointSearchConfig(baseURL string) loadsim.BreakpointSearchConfig {
+	base := loadsim.BreakpointStep{
+		Name:              "breakpoint",
+		BaseURL:           baseURL,
+		ActivityTriplets:  breakpointEnvInt("GATHERERS_BREAKPOINT_ACTIVITY_TRIPLETS", 20),
+		Interval:          breakpointEnvDuration("GATHERERS_BREAKPOINT_INTERVAL", 5*time.Millisecond),
+		InitialAntCount:   breakpointEnvInt("GATHERERS_BREAKPOINT_ANT_COUNT", 26),
+		InitialFoodCount:  breakpointEnvInt("GATHERERS_BREAKPOINT_STARTUP_FOOD_COUNT", 80),
+		Seed:              int64(breakpointEnvInt("GATHERERS_BREAKPOINT_SEED", 700)),
+		SendTimeout:       breakpointEnvDuration("GATHERERS_BREAKPOINT_SEND_TIMEOUT", 5*time.Second),
+		SettleTimeout:     breakpointEnvDuration("GATHERERS_BREAKPOINT_SETTLE_TIMEOUT", 5*time.Second),
+		StallTimeout:      breakpointEnvDuration("GATHERERS_BREAKPOINT_STALL_TIMEOUT", 1500*time.Millisecond),
+		ProgressPollEvery: breakpointEnvDuration("GATHERERS_BREAKPOINT_POLL_INTERVAL", 100*time.Millisecond),
+	}
+
+	return loadsim.BreakpointSearchConfig{
+		Steps: loadsim.BuildClientCountRamp(
+			breakpointEnvInt("GATHERERS_BREAKPOINT_START_CLIENTS", 25),
+			breakpointEnvInt("GATHERERS_BREAKPOINT_MAX_CLIENTS", 100),
+			breakpointEnvInt("GATHERERS_BREAKPOINT_STEP", 25),
+			base,
+		),
+		RunStep: loadsim.RunBackendBreakpointStep,
+	}
+}
+
+func breakpointEnvInt(name string, fallback int) int {
+	value := os.Getenv(name)
+	if value == "" {
+		return fallback
+	}
+
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
+}
+
+func breakpointEnvDuration(name string, fallback time.Duration) time.Duration {
+	value := os.Getenv(name)
+	if value == "" {
+		return fallback
+	}
+
+	parsed, err := time.ParseDuration(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
 }

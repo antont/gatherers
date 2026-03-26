@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"os"
 	"testing"
@@ -67,4 +68,44 @@ func TestLongStressDashboardReflectsSustainedLoad(t *testing.T) {
 		t.Fatalf("expected sims endpoint to respond: %v", err)
 	}
 	defer resp.Body.Close()
+}
+
+func TestFindBreakpointUnderRampLoad(t *testing.T) {
+	if os.Getenv("GATHERERS_FIND_BREAKPOINT") == "" {
+		t.Skip("set GATHERERS_FIND_BREAKPOINT=1 to run breakpoint search")
+	}
+
+	srv := New(config.Config{})
+	target := newTestTarget(t, srv.Handler())
+	defer target.closeFn()
+
+	ctx, cancel := context.WithTimeout(context.Background(), breakpointEnvDuration("GATHERERS_BREAKPOINT_TEST_TIMEOUT", 30*time.Second))
+	defer cancel()
+
+	report, err := loadsim.RunBreakpointSearch(ctx, buildBreakpointSearchConfig(target.baseURL))
+	if err != nil {
+		t.Fatalf("expected breakpoint search to complete cleanly: %v", err)
+	}
+
+	if report.FirstBad != nil {
+		t.Fatalf(
+			"breakpoint found at client_count=%d after last_good=%v: reason=%s message=%s expected=%+v observed=%+v client_errors=%v",
+			report.FirstBad.Step.ClientCount,
+			describeBreakpointResult(report.LastGood),
+			report.FirstBad.Failure.Kind,
+			report.FirstBad.Failure.Message,
+			report.FirstBad.Expected,
+			report.FirstBad.Observed,
+			report.FirstBad.Failure.ClientErrors,
+		)
+	}
+
+	t.Logf("no breakpoint found up to %s", describeBreakpointResult(report.LastGood))
+}
+
+func describeBreakpointResult(result *loadsim.BreakpointStepResult) string {
+	if result == nil {
+		return "none"
+	}
+	return fmt.Sprintf("client_count=%d expected=%+v observed=%+v", result.Step.ClientCount, result.Expected, result.Observed)
 }

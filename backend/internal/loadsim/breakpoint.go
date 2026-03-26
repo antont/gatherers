@@ -175,7 +175,7 @@ func RunBackendBreakpointStep(ctx context.Context, step BreakpointStep) (Breakpo
 		case <-doneCh:
 			goto completed
 		case <-progressTicker.C:
-			observed, err := fetchBreakpointTotals(sendCtx, step.BaseURL, step.SimIDPrefix)
+			observed, err := fetchBreakpointTotals(sendCtx, step.BaseURL, step.SimIDPrefix, step.InitialFoodCount)
 			if err != nil {
 				return BreakpointStepResult{}, err
 			}
@@ -200,7 +200,7 @@ func RunBackendBreakpointStep(ctx context.Context, step BreakpointStep) (Breakpo
 
 completed:
 	expected, clientErrors := collectBreakpointResults(totalsCh, errCh)
-	observed, err := waitForBreakpointTotals(sendCtx, step.BaseURL, step.SimIDPrefix, expected, step.SettleTimeout)
+	observed, err := waitForBreakpointTotals(sendCtx, step.BaseURL, step.SimIDPrefix, step.InitialFoodCount, expected, step.SettleTimeout)
 	if err != nil {
 		return BreakpointStepResult{}, err
 	}
@@ -380,11 +380,11 @@ func collectBreakpointResults(totalsCh <-chan BreakpointTotals, errCh <-chan err
 	return expected, clientErrors
 }
 
-func waitForBreakpointTotals(ctx context.Context, baseURL, simIDPrefix string, expected BreakpointTotals, timeout time.Duration) (BreakpointTotals, error) {
+func waitForBreakpointTotals(ctx context.Context, baseURL, simIDPrefix string, initialFoodCount int, expected BreakpointTotals, timeout time.Duration) (BreakpointTotals, error) {
 	deadline := time.Now().Add(timeout)
 	var last BreakpointTotals
 	for time.Now().Before(deadline) {
-		observed, err := fetchBreakpointTotals(ctx, baseURL, simIDPrefix)
+		observed, err := fetchBreakpointTotals(ctx, baseURL, simIDPrefix, initialFoodCount)
 		if err != nil {
 			return BreakpointTotals{}, err
 		}
@@ -409,7 +409,7 @@ type breakpointSimSummary struct {
 	LooseFoodCount int    `json:"loose_food_count"`
 }
 
-func fetchBreakpointTotals(ctx context.Context, baseURL, simIDPrefix string) (BreakpointTotals, error) {
+func fetchBreakpointTotals(ctx context.Context, baseURL, simIDPrefix string, initialFoodCount int) (BreakpointTotals, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/api/sims", nil)
 	if err != nil {
 		return BreakpointTotals{}, err
@@ -436,6 +436,13 @@ func fetchBreakpointTotals(ctx context.Context, baseURL, simIDPrefix string) (Br
 		totals.DropCount += sim.DropCount
 		totals.TurnMoveCount += sim.TurnMoveCount
 		totals.LooseFoodCount += sim.LooseFoodCount
+	}
+	if initialFoodCount > 0 {
+		numerator := totals.LooseFoodCount + totals.PickupCount - totals.DropCount
+		if numerator >= 0 && numerator%initialFoodCount == 0 {
+			snapshotCount := numerator / initialFoodCount
+			totals.SentEvents = totals.ConnectedSims + snapshotCount + totals.PickupCount + totals.DropCount + totals.TurnMoveCount
+		}
 	}
 	return totals, nil
 }

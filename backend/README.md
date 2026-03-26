@@ -79,6 +79,51 @@ GATHERERS_RUN_LONG_STRESS=1 \
 go test ./internal/server -run TestLongStressDashboardReflectsSustainedLoad -count=1
 ```
 
+Run the opt-in breakpoint finder:
+
+```bash
+cd backend
+GATHERERS_FIND_BREAKPOINT=1 \
+GATHERERS_BREAKPOINT_START_CLIENTS=25 \
+GATHERERS_BREAKPOINT_MAX_CLIENTS=150 \
+GATHERERS_BREAKPOINT_STEP=25 \
+go test ./internal/server -run TestFindBreakpointUnderRampLoad -count=1 -v
+```
+
+Useful breakpoint knobs:
+
+- `GATHERERS_BREAKPOINT_START_CLIENTS`, `GATHERERS_BREAKPOINT_MAX_CLIENTS`, `GATHERERS_BREAKPOINT_STEP` control the client-count ramp.
+- `GATHERERS_BREAKPOINT_ACTIVITY_TRIPLETS` controls how many pickup/move/drop triplets each client sends per step.
+- `GATHERERS_BREAKPOINT_SEND_TIMEOUT`, `GATHERERS_BREAKPOINT_SETTLE_TIMEOUT`, and `GATHERERS_BREAKPOINT_STALL_TIMEOUT` control failure timing.
+- `GATHERERS_BREAKPOINT_INTERVAL`, `GATHERERS_BREAKPOINT_STARTUP_FOOD_COUNT`, and `GATHERERS_BREAKPOINT_ANT_COUNT` control per-client event shape.
+
+Failure meanings:
+
+- `client_error`: at least one client could not connect or finish writing its step workload.
+- `exact_mismatch`: the backend totals did not catch up to the totals that clients successfully sent before the settle timeout expired.
+- `progress_stall`: backend-visible counters stopped changing for the configured stall window while clients were still expected to be active.
+
+Run the standalone breakpoint CLI:
+
+```bash
+cd backend
+go run ./cmd/breakpoint \
+  --start-clients 25 \
+  --max-clients 150 \
+  --step 25
+```
+
+Point the CLI at a manually running backend instead of spawning an in-process one:
+
+```bash
+cd backend
+go run ./cmd/breakpoint \
+  --base-url http://127.0.0.1:18080 \
+  --start-clients 25 \
+  --max-clients 150 \
+  --step 25
+```
+
 ## Realtime dashboard demo
 
 Start the backend on a known port:
