@@ -48,11 +48,9 @@ version = "0.18"
 default-features = false
 features = [
   "bevy_winit",         # Windowing backend
-  "bevy_log",           # Logging
+  "bevy_log",           # Log subscriber (crate compiles anyway; enables LogPlugin in DefaultPlugins)
   "default_font",       # Built-in font for text rendering
-  "2d_bevy_render",     # 2D rendering (includes sprite, render, core_pipeline)
-  "bevy_ui",            # UI framework (nodes, text, layout)
-  "bevy_ui_render",     # UI rendering backend
+  "bevy_ui_render",     # UI + sprite + render + camera + text (full transitive chain)
   "webgl2",             # WebGL2 for broad WASM browser support
 ]
 

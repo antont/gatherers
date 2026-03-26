@@ -5,6 +5,7 @@ use bevy::{
     prelude::*,
     window::{PresentMode, PrimaryWindow},
 };
+use log::{error, info};
 use rand::Rng;
 
 fn main() {
