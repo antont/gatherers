@@ -13,9 +13,10 @@ type FoodPickup struct {
 }
 
 type Summary struct {
-	LooseFoodCount               int
-	OccupiedCellCount            int
-	NearestNeighborMeanDistance  float64
+	ConnectedSimCount           int     `json:"connected_sim_count"`
+	LooseFoodCount              int     `json:"loose_food_count"`
+	OccupiedCellCount           int     `json:"occupied_cell_count"`
+	NearestNeighborMeanDistance float64 `json:"nearest_neighbor_mean_distance"`
 }
 
 type foodPosition struct {
@@ -44,6 +45,10 @@ func (s *Store) RecordDrop(simID string, drop FoodDrop) {
 	state.looseFood[drop.FoodID] = foodPosition{X: drop.X, Y: drop.Y}
 }
 
+func (s *Store) RecordHello(simID string) {
+	s.ensureSim(simID)
+}
+
 func (s *Store) RecordPickup(simID string, pickup FoodPickup) {
 	state := s.ensureSim(simID)
 	delete(state.looseFood, pickup.FoodID)
@@ -56,6 +61,7 @@ func (s *Store) GlobalSummary() Summary {
 	}
 
 	return Summary{
+		ConnectedSimCount:           len(s.sims),
 		LooseFoodCount:              len(positions),
 		OccupiedCellCount:           occupiedCellCount(positions, s.cellSize),
 		NearestNeighborMeanDistance: meanNearestNeighborDistance(positions),
