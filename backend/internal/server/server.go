@@ -28,6 +28,7 @@ func New(cfg config.Config) *Server {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handleDashboard)
+	mux.HandleFunc("/api/sims", s.handleSims)
 	mux.HandleFunc("/api/summary", s.handleSummary)
 	mux.HandleFunc("/ws/ingest", s.handleIngest)
 	return mux
@@ -77,6 +78,11 @@ type foodDropPayload struct {
 
 type foodPickupPayload struct {
 	FoodID string `json:"food_id"`
+}
+
+func (s *Server) handleSims(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(s.store.SimSummaries())
 }
 
 func (s *Server) handleSummary(w http.ResponseWriter, _ *http.Request) {
@@ -129,6 +135,8 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 			s.store.RecordPickup(event.SimID, state.FoodPickup{
 				FoodID: payload.FoodID,
 			})
+		case "ant_turn_move":
+			s.store.RecordTurnMove(event.SimID)
 		}
 	}
 }

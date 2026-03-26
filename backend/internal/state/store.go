@@ -25,12 +25,23 @@ type foodPosition struct {
 }
 
 type simState struct {
-	looseFood map[string]foodPosition
+	looseFood      map[string]foodPosition
+	pickupCount    int
+	dropCount      int
+	turnMoveCount  int
 }
 
 type Store struct {
 	cellSize float64
 	sims     map[string]*simState
+}
+
+type SimSummary struct {
+	SimID         string `json:"sim_id"`
+	PickupCount   int    `json:"pickup_count"`
+	DropCount     int    `json:"drop_count"`
+	TurnMoveCount int    `json:"turn_move_count"`
+	LooseFoodCount int   `json:"loose_food_count"`
 }
 
 func NewStore(cellSize float64) *Store {
@@ -43,6 +54,7 @@ func NewStore(cellSize float64) *Store {
 func (s *Store) RecordDrop(simID string, drop FoodDrop) {
 	state := s.ensureSim(simID)
 	state.looseFood[drop.FoodID] = foodPosition{X: drop.X, Y: drop.Y}
+	state.dropCount++
 }
 
 func (s *Store) RecordHello(simID string) {
@@ -52,6 +64,12 @@ func (s *Store) RecordHello(simID string) {
 func (s *Store) RecordPickup(simID string, pickup FoodPickup) {
 	state := s.ensureSim(simID)
 	delete(state.looseFood, pickup.FoodID)
+	state.pickupCount++
+}
+
+func (s *Store) RecordTurnMove(simID string) {
+	state := s.ensureSim(simID)
+	state.turnMoveCount++
 }
 
 func (s *Store) GlobalSummary() Summary {
@@ -79,6 +97,20 @@ func (s *Store) ensureSim(simID string) *simState {
 	}
 	s.sims[simID] = state
 	return state
+}
+
+func (s *Store) SimSummaries() []SimSummary {
+	summaries := make([]SimSummary, 0, len(s.sims))
+	for simID, sim := range s.sims {
+		summaries = append(summaries, SimSummary{
+			SimID:          simID,
+			PickupCount:    sim.pickupCount,
+			DropCount:      sim.dropCount,
+			TurnMoveCount:  sim.turnMoveCount,
+			LooseFoodCount: len(sim.looseFood),
+		})
+	}
+	return summaries
 }
 
 func (s *Store) allLooseFood() []foodPosition {
