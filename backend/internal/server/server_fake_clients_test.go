@@ -10,8 +10,7 @@ import (
 	"time"
 
 	"github.com/antont/gatherers/backend/internal/config"
-	"github.com/coder/websocket"
-	"github.com/coder/websocket/wsjson"
+	"github.com/antont/gatherers/backend/internal/loadsim"
 )
 
 func TestFakeClientsPopulatePerSimSummaries(t *testing.T) {
@@ -22,31 +21,31 @@ func TestFakeClientsPopulatePerSimSummaries(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	sendClientEvents(t, ctx, target.baseURL, []map[string]any{
+	sendClientEvents(t, ctx, target.baseURL, []loadsim.Event{
 		{
-			"type":         "sim_hello",
-			"sim_id":       "sim-a",
-			"seq":          1,
-			"timestamp_ms": 1000,
-			"payload":      map[string]any{"sim_name": "alpha"},
+			Type:        "sim_hello",
+			SimID:       "sim-a",
+			Seq:         1,
+			TimestampMS: 1000,
+			Payload:     map[string]any{"sim_name": "alpha"},
 		},
 		{
-			"type":         "food_drop",
-			"sim_id":       "sim-a",
-			"seq":          2,
-			"timestamp_ms": 1001,
-			"payload": map[string]any{
+			Type:        "food_drop",
+			SimID:       "sim-a",
+			Seq:         2,
+			TimestampMS: 1001,
+			Payload: map[string]any{
 				"food_id": "food-a1",
 				"x":       10.0,
 				"y":       10.0,
 			},
 		},
 		{
-			"type":         "ant_turn_move",
-			"sim_id":       "sim-a",
-			"seq":          3,
-			"timestamp_ms": 1002,
-			"payload": map[string]any{
+			Type:        "ant_turn_move",
+			SimID:       "sim-a",
+			Seq:         3,
+			TimestampMS: 1002,
+			Payload: map[string]any{
 				"ant_id":       "ant-a1",
 				"x":            11.0,
 				"y":            12.0,
@@ -57,31 +56,31 @@ func TestFakeClientsPopulatePerSimSummaries(t *testing.T) {
 		},
 	})
 
-	sendClientEvents(t, ctx, target.baseURL, []map[string]any{
+	sendClientEvents(t, ctx, target.baseURL, []loadsim.Event{
 		{
-			"type":         "sim_hello",
-			"sim_id":       "sim-b",
-			"seq":          1,
-			"timestamp_ms": 2000,
-			"payload":      map[string]any{"sim_name": "beta"},
+			Type:        "sim_hello",
+			SimID:       "sim-b",
+			Seq:         1,
+			TimestampMS: 2000,
+			Payload:     map[string]any{"sim_name": "beta"},
 		},
 		{
-			"type":         "food_drop",
-			"sim_id":       "sim-b",
-			"seq":          2,
-			"timestamp_ms": 2001,
-			"payload": map[string]any{
+			Type:        "food_drop",
+			SimID:       "sim-b",
+			Seq:         2,
+			TimestampMS: 2001,
+			Payload: map[string]any{
 				"food_id": "food-b1",
 				"x":       100.0,
 				"y":       50.0,
 			},
 		},
 		{
-			"type":         "food_pickup",
-			"sim_id":       "sim-b",
-			"seq":          3,
-			"timestamp_ms": 2002,
-			"payload": map[string]any{
+			Type:        "food_pickup",
+			SimID:       "sim-b",
+			Seq:         3,
+			TimestampMS: 2002,
+			Payload: map[string]any{
 				"food_id": "food-b1",
 			},
 		},
@@ -157,19 +156,14 @@ func TestFakeClientsPopulatePerSimSummaries(t *testing.T) {
 	}
 }
 
-func sendClientEvents(t *testing.T, ctx context.Context, baseURL string, events []map[string]any) {
+func sendClientEvents(t *testing.T, ctx context.Context, baseURL string, events []loadsim.Event) {
 	t.Helper()
 
-	wsURL := strings.Replace(baseURL, "http://", "ws://", 1) + "/ws/ingest"
-	conn, _, err := websocket.Dial(ctx, wsURL, nil)
-	if err != nil {
-		t.Fatalf("expected websocket ingest endpoint to accept connection: %v", err)
-	}
-	defer conn.Close(websocket.StatusNormalClosure, "")
-
-	for _, event := range events {
-		if err := wsjson.Write(ctx, conn, event); err != nil {
-			t.Fatalf("expected event %#v to be accepted over websocket: %v", event["type"], err)
+	if err := loadsim.SendEvents(ctx, baseURL, events); err != nil {
+		failedType := "<unknown>"
+		if len(events) > 0 {
+			failedType = events[0].Type
 		}
+		t.Fatalf("expected %q event batch to be accepted over websocket: %v", failedType, err)
 	}
 }

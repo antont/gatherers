@@ -5,14 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/antont/gatherers/backend/internal/config"
-	"github.com/coder/websocket"
-	"github.com/coder/websocket/wsjson"
+	"github.com/antont/gatherers/backend/internal/loadsim"
 )
 
 func TestStressHundredFakeClients(t *testing.T) {
@@ -38,22 +36,22 @@ func TestStressHundredFakeClients(t *testing.T) {
 			<-start
 
 			simID := fmt.Sprintf("sim-%03d", i)
-			err := sendClientEventsErr(ctx, target.baseURL, []map[string]any{
+			err := sendClientEventsErr(ctx, target.baseURL, []loadsim.Event{
 				{
-					"type":         "sim_hello",
-					"sim_id":       simID,
-					"seq":          1,
-					"timestamp_ms": 1000 + i,
-					"payload": map[string]any{
+					Type:        "sim_hello",
+					SimID:       simID,
+					Seq:         1,
+					TimestampMS: int64(1000 + i),
+					Payload: map[string]any{
 						"sim_name": simID,
 					},
 				},
 				{
-					"type":         "food_drop",
-					"sim_id":       simID,
-					"seq":          2,
-					"timestamp_ms": 2000 + i,
-					"payload": map[string]any{
+					Type:        "food_drop",
+					SimID:       simID,
+					Seq:         2,
+					TimestampMS: int64(2000 + i),
+					Payload: map[string]any{
 						"food_id": fmt.Sprintf("food-%03d", i),
 						"x":       float64(i),
 						"y":       float64(i),
@@ -88,21 +86,8 @@ func TestStressHundredFakeClients(t *testing.T) {
 	}
 }
 
-func sendClientEventsErr(ctx context.Context, baseURL string, events []map[string]any) error {
-	wsURL := strings.Replace(baseURL, "http://", "ws://", 1) + "/ws/ingest"
-	conn, _, err := websocket.Dial(ctx, wsURL, nil)
-	if err != nil {
-		return err
-	}
-	defer conn.Close(websocket.StatusNormalClosure, "")
-
-	for _, event := range events {
-		if err := wsjson.Write(ctx, conn, event); err != nil {
-			return err
-		}
-	}
-
-	return nil
+func sendClientEventsErr(ctx context.Context, baseURL string, events []loadsim.Event) error {
+	return loadsim.SendEvents(ctx, baseURL, events)
 }
 
 func fetchSummary(t *testing.T, baseURL string) struct {
