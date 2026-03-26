@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/antont/gatherers/backend/internal/config"
 	"github.com/antont/gatherers/backend/internal/state"
@@ -15,17 +16,51 @@ import (
 )
 
 type Server struct {
-	cfg  config.Config
+	cfg   config.Config
 	store *state.Store
-	hub  *dashboardHub
+	hub   *dashboardHub
+
+	snapshotMu     sync.RWMutex
+	cachedSnapshot dashboardSnapshot
+
+	refreshMu         sync.Mutex
+	dirty             bool
+	dashboardWatchers int
+	lastAPIReadAt     time.Time
+	nextEligibleAt    time.Time
+
+	refreshCh    chan struct{}
+	workerOnce   sync.Once
+	closeOnce    sync.Once
+	workerCancel context.CancelFunc
+
+	now                func() time.Time
+	minRefreshInterval time.Duration
+	maxRefreshInterval time.Duration
+	refreshMultiplier  int
+	apiDemandTTL       time.Duration
 }
 
 func New(cfg config.Config) *Server {
 	return &Server{
-		cfg:   cfg,
-		store: state.NewStore(50),
-		hub:   newDashboardHub(),
+		cfg:                cfg,
+		store:              state.NewStore(50),
+		hub:                newDashboardHub(),
+		refreshCh:          make(chan struct{}, 1),
+		now:                time.Now,
+		minRefreshInterval: 250 * time.Millisecond,
+		maxRefreshInterval: 5 * time.Second,
+		refreshMultiplier:  3,
+		apiDemandTTL:       10 * time.Second,
 	}
+}
+
+func (s *Server) Close() {
+	s.closeOnce.Do(func() {
+		if s.workerCancel != nil {
+			s.workerCancel()
+		}
+	})
 }
 
 func (s *Server) Handler() http.Handler {
@@ -39,6 +74,8 @@ func (s *Server) Handler() http.Handler {
 }
 
 func (s *Server) Run(ctx context.Context) error {
+	defer s.Close()
+
 	httpServer := &http.Server{
 		Addr:    s.cfg.Addr,
 		Handler: s.Handler(),
@@ -105,17 +142,21 @@ type dashboardHub struct {
 }
 
 func (s *Server) handleSims(w http.ResponseWriter, _ *http.Request) {
+	snapshot := s.currentSnapshot()
+	s.registerAPIDemand()
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(s.store.SimSummaries())
+	_ = json.NewEncoder(w).Encode(snapshot.Sims)
 }
 
 func (s *Server) handleSummary(w http.ResponseWriter, _ *http.Request) {
+	snapshot := s.currentSnapshot()
+	s.registerAPIDemand()
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(s.store.GlobalSummary())
+	_ = json.NewEncoder(w).Encode(snapshot.Summary)
 }
 
 func (s *Server) handleDashboard(w http.ResponseWriter, _ *http.Request) {
-	summary := s.store.GlobalSummary()
+	summary := s.currentSnapshot().Summary
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = fmt.Fprintf(w, `<!doctype html>
 <html lang="en">
@@ -211,6 +252,14 @@ func (s *Server) handleDashboard(w http.ResponseWriter, _ *http.Request) {
         <div class="label">Mean nearest-neighbor distance</div>
         <div class="value" id="nearest-neighbor-value">%.2f</div>
       </div>
+      <div class="card">
+        <div class="label">Elapsed time</div>
+        <div class="value" id="elapsed-seconds-value">%.1fs</div>
+      </div>
+      <div class="card">
+        <div class="label">Events/sec</div>
+        <div class="value" id="events-per-second-value">%.2f</div>
+      </div>
     </section>
     <section class="panel">
       <div class="label">Last update</div>
@@ -240,6 +289,8 @@ func (s *Server) handleDashboard(w http.ResponseWriter, _ *http.Request) {
     const looseFoodValue = document.getElementById("loose-food-value");
     const occupiedCellsValue = document.getElementById("occupied-cells-value");
     const nearestNeighborValue = document.getElementById("nearest-neighbor-value");
+    const elapsedSecondsValue = document.getElementById("elapsed-seconds-value");
+    const eventsPerSecondValue = document.getElementById("events-per-second-value");
     const lastUpdatedValue = document.getElementById("last-updated-value");
     const simTableBody = document.getElementById("sim-table-body");
 
@@ -248,6 +299,8 @@ func (s *Server) handleDashboard(w http.ResponseWriter, _ *http.Request) {
       looseFoodValue.textContent = String(snapshot.summary.loose_food_count ?? 0);
       occupiedCellsValue.textContent = String(snapshot.summary.occupied_cell_count ?? 0);
       nearestNeighborValue.textContent = Number(snapshot.summary.nearest_neighbor_mean_distance ?? 0).toFixed(2);
+      elapsedSecondsValue.textContent = Number(snapshot.summary.elapsed_seconds ?? 0).toFixed(1) + "s";
+      eventsPerSecondValue.textContent = Number(snapshot.summary.events_per_second ?? 0).toFixed(2);
       lastUpdatedValue.textContent = new Date().toLocaleTimeString();
 
       const sims = [...(snapshot.sims ?? [])].sort((a, b) => a.sim_id.localeCompare(b.sim_id));
@@ -278,7 +331,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, _ *http.Request) {
     });
   </script>
 </body>
-</html>`, summary.ConnectedSimCount, summary.LooseFoodCount, summary.OccupiedCellCount, summary.NearestNeighborMeanDistance)
+</html>`, summary.ConnectedSimCount, summary.LooseFoodCount, summary.OccupiedCellCount, summary.NearestNeighborMeanDistance, summary.ElapsedSeconds, summary.EventsPerSecond)
 }
 
 func (s *Server) handleDashboardWS(w http.ResponseWriter, r *http.Request) {
@@ -288,12 +341,16 @@ func (s *Server) handleDashboardWS(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "")
 
+	initialSnapshot := s.currentSnapshot()
 	updates, unsubscribe := s.hub.subscribe()
 	defer unsubscribe()
 
-	if err := wsjson.Write(r.Context(), conn, s.dashboardSnapshot()); err != nil {
+	if err := wsjson.Write(r.Context(), conn, initialSnapshot); err != nil {
 		return
 	}
+
+	s.addDashboardWatcher(1)
+	defer s.addDashboardWatcher(-1)
 
 	for {
 		select {
@@ -333,7 +390,7 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			s.store.RecordHello(event.SimID, payload.AntCount)
-			s.broadcastDashboardSnapshot()
+			s.markSnapshotDirty()
 		case "sim_food_snapshot":
 			var payload foodSnapshotPayload
 			if err := json.Unmarshal(event.Payload, &payload); err != nil {
@@ -348,7 +405,7 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 				})
 			}
 			s.store.RecordFoodSnapshot(event.SimID, foods)
-			s.broadcastDashboardSnapshot()
+			s.markSnapshotDirty()
 		case "food_drop":
 			var payload foodDropPayload
 			if err := json.Unmarshal(event.Payload, &payload); err != nil {
@@ -359,7 +416,7 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 				X:      payload.X,
 				Y:      payload.Y,
 			})
-			s.broadcastDashboardSnapshot()
+			s.markSnapshotDirty()
 		case "food_pickup":
 			var payload foodPickupPayload
 			if err := json.Unmarshal(event.Payload, &payload); err != nil {
@@ -368,10 +425,10 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 			s.store.RecordPickup(event.SimID, state.FoodPickup{
 				FoodID: payload.FoodID,
 			})
-			s.broadcastDashboardSnapshot()
+			s.markSnapshotDirty()
 		case "ant_turn_move":
 			s.store.RecordTurnMove(event.SimID)
-			s.broadcastDashboardSnapshot()
+			s.markSnapshotDirty()
 		}
 	}
 }
@@ -419,13 +476,169 @@ func (h *dashboardHub) broadcast(snapshot dashboardSnapshot) {
 	}
 }
 
-func (s *Server) broadcastDashboardSnapshot() {
-	s.hub.broadcast(s.dashboardSnapshot())
+func (s *Server) currentSnapshot() dashboardSnapshot {
+	s.snapshotMu.RLock()
+	defer s.snapshotMu.RUnlock()
+	return s.cachedSnapshot
 }
 
-func (s *Server) dashboardSnapshot() dashboardSnapshot {
+func (s *Server) replaceSnapshot(snapshot dashboardSnapshot) {
+	s.snapshotMu.Lock()
+	s.cachedSnapshot = snapshot
+	s.snapshotMu.Unlock()
+}
+
+func (s *Server) markSnapshotDirty() {
+	s.refreshMu.Lock()
+	s.dirty = true
+	hasDemand := s.hasDemandLocked(s.now())
+	s.refreshMu.Unlock()
+
+	if hasDemand {
+		s.ensureWorker()
+		s.signalRefresh()
+	}
+}
+
+func (s *Server) registerAPIDemand() {
+	s.refreshMu.Lock()
+	s.lastAPIReadAt = s.now()
+	s.refreshMu.Unlock()
+
+	s.ensureWorker()
+	s.signalRefresh()
+}
+
+func (s *Server) addDashboardWatcher(delta int) {
+	s.refreshMu.Lock()
+	s.dashboardWatchers += delta
+	if s.dashboardWatchers < 0 {
+		s.dashboardWatchers = 0
+	}
+	s.refreshMu.Unlock()
+
+	if delta > 0 {
+		s.ensureWorker()
+		s.signalRefresh()
+	}
+}
+
+func (s *Server) ensureWorker() {
+	s.workerOnce.Do(func() {
+		ctx, cancel := context.WithCancel(context.Background())
+		s.workerCancel = cancel
+		go s.runSnapshotWorker(ctx)
+	})
+}
+
+func (s *Server) signalRefresh() {
+	select {
+	case s.refreshCh <- struct{}{}:
+	default:
+	}
+}
+
+func (s *Server) runSnapshotWorker(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-s.refreshCh:
+			for {
+				delay, shouldWait, shouldRefresh := s.nextRefreshPlan(s.now())
+				if !shouldRefresh {
+					break
+				}
+				if shouldWait {
+					timer := time.NewTimer(delay)
+					select {
+					case <-ctx.Done():
+						if !timer.Stop() {
+							<-timer.C
+						}
+						return
+					case <-s.refreshCh:
+						if !timer.Stop() {
+							<-timer.C
+						}
+						continue
+					case <-timer.C:
+					}
+				}
+
+				if !s.claimDirtyRefresh(s.now()) {
+					continue
+				}
+
+				started := s.now()
+				snapshot := s.computeDashboardSnapshot()
+				computeDuration := s.now().Sub(started)
+				s.replaceSnapshot(snapshot)
+				s.finishRefresh(computeDuration)
+				s.hub.broadcast(snapshot)
+			}
+		}
+	}
+}
+
+func (s *Server) nextRefreshPlan(now time.Time) (delay time.Duration, shouldWait bool, shouldRefresh bool) {
+	s.refreshMu.Lock()
+	defer s.refreshMu.Unlock()
+
+	if !s.hasDemandLocked(now) || !s.dirty {
+		return 0, false, false
+	}
+	if !s.nextEligibleAt.IsZero() && now.Before(s.nextEligibleAt) {
+		return s.nextEligibleAt.Sub(now), true, true
+	}
+	return 0, false, true
+}
+
+func (s *Server) claimDirtyRefresh(now time.Time) bool {
+	s.refreshMu.Lock()
+	defer s.refreshMu.Unlock()
+
+	if !s.hasDemandLocked(now) || !s.dirty {
+		return false
+	}
+	if !s.nextEligibleAt.IsZero() && now.Before(s.nextEligibleAt) {
+		return false
+	}
+	s.dirty = false
+	return true
+}
+
+func (s *Server) finishRefresh(computeDuration time.Duration) {
+	s.refreshMu.Lock()
+	s.nextEligibleAt = s.now().Add(s.adaptiveRefreshInterval(computeDuration))
+	s.refreshMu.Unlock()
+}
+
+func (s *Server) adaptiveRefreshInterval(computeDuration time.Duration) time.Duration {
+	interval := computeDuration * time.Duration(s.refreshMultiplier)
+	if interval < s.minRefreshInterval {
+		interval = s.minRefreshInterval
+	}
+	if interval > s.maxRefreshInterval {
+		interval = s.maxRefreshInterval
+	}
+	return interval
+}
+
+func (s *Server) hasDemandLocked(now time.Time) bool {
+	if s.dashboardWatchers > 0 {
+		return true
+	}
+	if s.lastAPIReadAt.IsZero() {
+		return false
+	}
+	return now.Sub(s.lastAPIReadAt) <= s.apiDemandTTL
+}
+
+func (s *Server) computeDashboardSnapshot() dashboardSnapshot {
+	data := s.store.DashboardSnapshotData()
 	return dashboardSnapshot{
-		Summary: s.store.GlobalSummary(),
-		Sims:    s.store.SimSummaries(),
+		Summary: data.Summary(s.now()),
+		Sims:    data.SimSummaries(),
 	}
 }

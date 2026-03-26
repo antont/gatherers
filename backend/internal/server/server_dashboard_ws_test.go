@@ -88,6 +88,71 @@ func TestDashboardWebsocketReceivesUpdatedSnapshotAfterIngest(t *testing.T) {
 	}
 }
 
+func TestDashboardWebsocketStartsWithCachedSnapshotThenCatchesUp(t *testing.T) {
+	srv := New(config.Config{})
+	target := newTestTarget(t, srv.Handler())
+	defer target.closeFn()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	err := loadsim.SendEvents(ctx, target.baseURL, []loadsim.Event{
+		{
+			Type:        "sim_hello",
+			SimID:       "sim-lazy-dashboard",
+			Seq:         1,
+			TimestampMS: 1000,
+			Payload: map[string]any{
+				"sim_name":   "lazy-dashboard",
+				"ant_count":  26,
+				"food_count": 80,
+			},
+		},
+		{
+			Type:        "food_drop",
+			SimID:       "sim-lazy-dashboard",
+			Seq:         2,
+			TimestampMS: 1001,
+			Payload: map[string]any{
+				"food_id": "food-1",
+				"x":       12.0,
+				"y":       18.0,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected ingest events to succeed before demand starts: %v", err)
+	}
+
+	dashboardConn, _, err := websocket.Dial(ctx, websocketURL(target.baseURL, "/ws/dashboard"), nil)
+	if err != nil {
+		t.Fatalf("expected dashboard websocket endpoint to accept connection: %v", err)
+	}
+	defer dashboardConn.Close(websocket.StatusNormalClosure, "")
+
+	var initial dashboardSnapshotMessage
+	if err := wsjson.Read(ctx, dashboardConn, &initial); err != nil {
+		t.Fatalf("expected initial cached dashboard snapshot: %v", err)
+	}
+
+	if initial.Summary.ConnectedSimCount != 0 || initial.Summary.LooseFoodCount != 0 || len(initial.Sims) != 0 {
+		t.Fatalf("expected first dashboard snapshot to be stale cached state before demand-driven refresh, got %+v", initial)
+	}
+
+	update := waitForDashboardSnapshot(t, ctx, dashboardConn, func(snapshot dashboardSnapshotMessage) bool {
+		return snapshot.Summary.ConnectedSimCount == 1 &&
+			snapshot.Summary.LooseFoodCount == 1 &&
+			len(snapshot.Sims) == 1 &&
+			snapshot.Sims[0].SimID == "sim-lazy-dashboard" &&
+			snapshot.Sims[0].DropCount == 1 &&
+			snapshot.Sims[0].LooseFoodCount == 1
+	})
+
+	if update.Summary.ConnectedSimCount != 1 || update.Summary.LooseFoodCount != 1 {
+		t.Fatalf("expected demand-driven dashboard refresh to catch up, got %+v", update)
+	}
+}
+
 type dashboardSnapshotMessage struct {
 	Summary struct {
 		ConnectedSimCount int `json:"connected_sim_count"`

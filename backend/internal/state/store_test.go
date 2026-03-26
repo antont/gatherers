@@ -1,6 +1,10 @@
 package state
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+	"time"
+)
 
 func TestStoreTracksLooseFoodAcrossDropAndPickup(t *testing.T) {
 	store := NewStore(50)
@@ -76,5 +80,58 @@ func TestGlobalSummaryDistinguishesClusteredFromSparseFood(t *testing.T) {
 			clusteredSummary.NearestNeighborMeanDistance,
 			sparseSummary.NearestNeighborMeanDistance,
 		)
+	}
+}
+
+func TestGlobalSummaryReportsElapsedAndEventRate(t *testing.T) {
+	store := NewStore(50)
+	currentTime := time.Unix(1_000, 0)
+	store.now = func() time.Time { return currentTime }
+
+	store.RecordHello("sim-a", 26)
+
+	currentTime = currentTime.Add(2 * time.Second)
+	store.RecordDrop("sim-a", FoodDrop{
+		FoodID: "food-1",
+		X:      10,
+		Y:      10,
+	})
+
+	summary := store.GlobalSummary()
+	if summary.ElapsedSeconds != 2 {
+		t.Fatalf("expected elapsed seconds to be 2, got %f", summary.ElapsedSeconds)
+	}
+	if summary.EventsPerSecond != 1 {
+		t.Fatalf("expected events per second to be 1, got %f", summary.EventsPerSecond)
+	}
+}
+
+func TestDashboardSnapshotDataMatchesCurrentStoreViews(t *testing.T) {
+	store := NewStore(50)
+	currentTime := time.Unix(2_000, 0)
+	store.now = func() time.Time { return currentTime }
+
+	store.RecordHello("sim-a", 26)
+	store.RecordFoodSnapshot("sim-a", []FoodDrop{
+		{FoodID: "food-1", X: 10, Y: 10},
+		{FoodID: "food-2", X: 20, Y: 20},
+	})
+	store.RecordPickup("sim-a", FoodPickup{FoodID: "food-1"})
+	store.RecordTurnMove("sim-a")
+
+	currentTime = currentTime.Add(3 * time.Second)
+	store.RecordHello("sim-b", 13)
+	store.RecordDrop("sim-b", FoodDrop{FoodID: "food-3", X: 100, Y: 100})
+
+	snapshot := store.DashboardSnapshotData()
+	gotSummary := snapshot.Summary(currentTime)
+	gotSims := snapshot.SimSummaries()
+
+	if wantSummary := store.GlobalSummary(); !reflect.DeepEqual(gotSummary, wantSummary) {
+		t.Fatalf("expected snapshot summary %+v to match current store summary %+v", gotSummary, wantSummary)
+	}
+
+	if wantSims := store.SimSummaries(); !reflect.DeepEqual(gotSims, wantSims) {
+		t.Fatalf("expected snapshot sims %+v to match current store sims %+v", gotSims, wantSims)
 	}
 }

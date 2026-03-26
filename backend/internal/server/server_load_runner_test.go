@@ -2,8 +2,6 @@ package server
 
 import (
 	"context"
-	"encoding/json"
-	"net/http"
 	"testing"
 	"time"
 
@@ -31,21 +29,17 @@ func TestLoadRunnerGeneratesMixedPerSimActivity(t *testing.T) {
 		t.Fatalf("expected load runner to complete successfully: %v", err)
 	}
 
-	resp, err := http.Get(target.baseURL + "/api/sims")
-	if err != nil {
-		t.Fatalf("expected sims endpoint to respond: %v", err)
-	}
-	defer resp.Body.Close()
-
-	var sims []struct {
-		SimID         string `json:"sim_id"`
-		PickupCount   int    `json:"pickup_count"`
-		DropCount     int    `json:"drop_count"`
-		TurnMoveCount int    `json:"turn_move_count"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&sims); err != nil {
-		t.Fatalf("expected sims JSON to decode: %v", err)
-	}
+	sims := waitForSimSummaries(t, target.baseURL, 1500*time.Millisecond, func(sims []simSummaryResponse) bool {
+		if len(sims) != 3 {
+			return false
+		}
+		for _, sim := range sims {
+			if sim.DropCount == 0 || sim.PickupCount == 0 || sim.TurnMoveCount == 0 {
+				return false
+			}
+		}
+		return true
+	})
 
 	if len(sims) != 3 {
 		t.Fatalf("expected 3 sim summaries, got %d", len(sims))

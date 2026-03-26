@@ -3,6 +3,7 @@ package state
 import (
 	"math"
 	"sync"
+	"time"
 )
 
 type FoodDrop struct {
@@ -20,6 +21,8 @@ type Summary struct {
 	LooseFoodCount              int     `json:"loose_food_count"`
 	OccupiedCellCount           int     `json:"occupied_cell_count"`
 	NearestNeighborMeanDistance float64 `json:"nearest_neighbor_mean_distance"`
+	ElapsedSeconds              float64 `json:"elapsed_seconds"`
+	EventsPerSecond             float64 `json:"events_per_second"`
 }
 
 type foodPosition struct {
@@ -28,32 +31,44 @@ type foodPosition struct {
 }
 
 type simState struct {
-	looseFood      map[string]foodPosition
-	antCount       int
-	pickupCount    int
-	dropCount      int
-	turnMoveCount  int
+	looseFood     map[string]foodPosition
+	antCount      int
+	connectedAt   time.Time
+	totalEvents   int
+	pickupCount   int
+	dropCount     int
+	turnMoveCount int
 }
 
 type Store struct {
 	mu       sync.RWMutex
 	cellSize float64
 	sims     map[string]*simState
+	now      func() time.Time
+}
+
+type DashboardSnapshotData struct {
+	cellSize    float64
+	sims        []SimSummary
+	looseFood   []foodPosition
+	startedAt   time.Time
+	totalEvents int
 }
 
 type SimSummary struct {
-	SimID         string `json:"sim_id"`
-	AntCount      int    `json:"ant_count"`
-	PickupCount   int    `json:"pickup_count"`
-	DropCount     int    `json:"drop_count"`
-	TurnMoveCount int    `json:"turn_move_count"`
-	LooseFoodCount int   `json:"loose_food_count"`
+	SimID          string `json:"sim_id"`
+	AntCount       int    `json:"ant_count"`
+	PickupCount    int    `json:"pickup_count"`
+	DropCount      int    `json:"drop_count"`
+	TurnMoveCount  int    `json:"turn_move_count"`
+	LooseFoodCount int    `json:"loose_food_count"`
 }
 
 func NewStore(cellSize float64) *Store {
 	return &Store{
 		cellSize: cellSize,
 		sims:     make(map[string]*simState),
+		now:      time.Now,
 	}
 }
 
@@ -62,6 +77,7 @@ func (s *Store) RecordDrop(simID string, drop FoodDrop) {
 	defer s.mu.Unlock()
 
 	state := s.ensureSim(simID)
+	state.recordEvent(s.now())
 	state.looseFood[drop.FoodID] = foodPosition{X: drop.X, Y: drop.Y}
 	state.dropCount++
 }
@@ -72,6 +88,7 @@ func (s *Store) RecordHello(simID string, antCount int) {
 
 	state := s.ensureSim(simID)
 	state.antCount = antCount
+	state.recordEvent(s.now())
 }
 
 func (s *Store) RecordFoodSnapshot(simID string, foods []FoodDrop) {
@@ -79,6 +96,7 @@ func (s *Store) RecordFoodSnapshot(simID string, foods []FoodDrop) {
 	defer s.mu.Unlock()
 
 	state := s.ensureSim(simID)
+	state.recordEvent(s.now())
 	state.looseFood = make(map[string]foodPosition, len(foods))
 	for _, food := range foods {
 		state.looseFood[food.FoodID] = foodPosition{X: food.X, Y: food.Y}
@@ -90,6 +108,7 @@ func (s *Store) RecordPickup(simID string, pickup FoodPickup) {
 	defer s.mu.Unlock()
 
 	state := s.ensureSim(simID)
+	state.recordEvent(s.now())
 	delete(state.looseFood, pickup.FoodID)
 	state.pickupCount++
 }
@@ -99,26 +118,12 @@ func (s *Store) RecordTurnMove(simID string) {
 	defer s.mu.Unlock()
 
 	state := s.ensureSim(simID)
+	state.recordEvent(s.now())
 	state.turnMoveCount++
 }
 
 func (s *Store) GlobalSummary() Summary {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	positions := s.allLooseFood()
-	if len(positions) == 0 {
-		return Summary{
-			ConnectedSimCount: len(s.sims),
-		}
-	}
-
-	return Summary{
-		ConnectedSimCount:           len(s.sims),
-		LooseFoodCount:              len(positions),
-		OccupiedCellCount:           occupiedCellCount(positions, s.cellSize),
-		NearestNeighborMeanDistance: meanNearestNeighborDistance(positions),
-	}
+	return s.DashboardSnapshotData().Summary(s.now())
 }
 
 func (s *Store) ensureSim(simID string) *simState {
@@ -135,10 +140,17 @@ func (s *Store) ensureSim(simID string) *simState {
 }
 
 func (s *Store) SimSummaries() []SimSummary {
+	return s.DashboardSnapshotData().SimSummaries()
+}
+
+func (s *Store) DashboardSnapshotData() DashboardSnapshotData {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	summaries := make([]SimSummary, 0, len(s.sims))
+	positions := make([]foodPosition, 0)
+	var startedAt time.Time
+	totalEvents := 0
 	for simID, sim := range s.sims {
 		summaries = append(summaries, SimSummary{
 			SimID:          simID,
@@ -148,18 +160,68 @@ func (s *Store) SimSummaries() []SimSummary {
 			TurnMoveCount:  sim.turnMoveCount,
 			LooseFoodCount: len(sim.looseFood),
 		})
-	}
-	return summaries
-}
-
-func (s *Store) allLooseFood() []foodPosition {
-	positions := make([]foodPosition, 0)
-	for _, sim := range s.sims {
+		totalEvents += sim.totalEvents
+		if !sim.connectedAt.IsZero() && (startedAt.IsZero() || sim.connectedAt.Before(startedAt)) {
+			startedAt = sim.connectedAt
+		}
 		for _, pos := range sim.looseFood {
 			positions = append(positions, pos)
 		}
 	}
-	return positions
+
+	return DashboardSnapshotData{
+		cellSize:    s.cellSize,
+		sims:        summaries,
+		looseFood:   positions,
+		startedAt:   startedAt,
+		totalEvents: totalEvents,
+	}
+}
+
+func (d DashboardSnapshotData) SimSummaries() []SimSummary {
+	summaries := make([]SimSummary, len(d.sims))
+	copy(summaries, d.sims)
+	return summaries
+}
+
+func (d DashboardSnapshotData) Summary(now time.Time) Summary {
+	elapsedSeconds, eventsPerSecond := d.metrics(now)
+	if len(d.looseFood) == 0 {
+		return Summary{
+			ConnectedSimCount: len(d.sims),
+			ElapsedSeconds:    elapsedSeconds,
+			EventsPerSecond:   eventsPerSecond,
+		}
+	}
+
+	return Summary{
+		ConnectedSimCount:           len(d.sims),
+		LooseFoodCount:              len(d.looseFood),
+		OccupiedCellCount:           occupiedCellCount(d.looseFood, d.cellSize),
+		NearestNeighborMeanDistance: meanNearestNeighborDistance(d.looseFood),
+		ElapsedSeconds:              elapsedSeconds,
+		EventsPerSecond:             eventsPerSecond,
+	}
+}
+
+func (s *simState) recordEvent(now time.Time) {
+	if s.connectedAt.IsZero() {
+		s.connectedAt = now
+	}
+	s.totalEvents++
+}
+
+func (d DashboardSnapshotData) metrics(now time.Time) (float64, float64) {
+	if d.startedAt.IsZero() {
+		return 0, 0
+	}
+
+	elapsedSeconds := now.Sub(d.startedAt).Seconds()
+	if elapsedSeconds <= 0 {
+		return 0, 0
+	}
+
+	return elapsedSeconds, float64(d.totalEvents) / elapsedSeconds
 }
 
 func occupiedCellCount(positions []foodPosition, cellSize float64) int {
