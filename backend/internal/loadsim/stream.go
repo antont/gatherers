@@ -2,7 +2,9 @@ package loadsim
 
 import (
 	"context"
+	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/coder/websocket"
@@ -26,6 +28,15 @@ type Event struct {
 	Seq         uint64 `json:"seq"`
 	TimestampMS int64  `json:"timestamp_ms"`
 	Payload     any    `json:"payload,omitempty"`
+}
+
+type RunOptions struct {
+	BaseURL     string
+	ClientCount int
+	Duration    time.Duration
+	Interval    time.Duration
+	Seed        int64
+	SimIDPrefix string
 }
 
 type ClientEventStream struct {
@@ -158,11 +169,88 @@ func SendEvents(ctx context.Context, baseURL string, events []Event) error {
 	return nil
 }
 
+func Run(ctx context.Context, opts RunOptions) error {
+	if opts.ClientCount <= 0 {
+		return nil
+	}
+	if opts.Interval <= 0 {
+		opts.Interval = 20 * time.Millisecond
+	}
+	if opts.SimIDPrefix == "" {
+		opts.SimIDPrefix = "sim"
+	}
+
+	runCtx := ctx
+	cancel := func() {}
+	if opts.Duration > 0 {
+		runCtx, cancel = context.WithTimeout(ctx, opts.Duration)
+	}
+	defer cancel()
+
+	errCh := make(chan error, opts.ClientCount)
+	var wg sync.WaitGroup
+	for i := 0; i < opts.ClientCount; i++ {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			errCh <- runClient(runCtx, opts, index)
+		}(i)
+	}
+
+	wg.Wait()
+	close(errCh)
+
+	for err := range errCh {
+		if err != nil && err != context.DeadlineExceeded && err != context.Canceled {
+			return err
+		}
+	}
+	return nil
+}
+
 func ingestWebsocketURL(baseURL string) string {
 	switch {
 	case strings.HasPrefix(baseURL, "https://"):
 		return "wss://" + strings.TrimPrefix(baseURL, "https://") + "/ws/ingest"
 	default:
 		return "ws://" + strings.TrimPrefix(baseURL, "http://") + "/ws/ingest"
+	}
+}
+
+func runClient(ctx context.Context, opts RunOptions, index int) error {
+	wsURL := ingestWebsocketURL(opts.BaseURL)
+	conn, _, err := websocket.Dial(ctx, wsURL, nil)
+	if err != nil {
+		return err
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	stream := NewClientEventStream(ClientOptions{
+		SimID:     fmt.Sprintf("%s-%03d", opts.SimIDPrefix, index),
+		SimName:   fmt.Sprintf("%s-%03d", opts.SimIDPrefix, index),
+		Seed:      opts.Seed + int64(index),
+		StartX:    float64(index),
+		StartY:    float64(index),
+		StartFood: fmt.Sprintf("%s-food-%03d", opts.SimIDPrefix, index),
+		StartAnt:  fmt.Sprintf("%s-ant-%03d", opts.SimIDPrefix, index),
+		Interval:  opts.Interval,
+	})
+
+	if err := wsjson.Write(ctx, conn, stream.NextEvent()); err != nil {
+		return err
+	}
+
+	ticker := time.NewTicker(opts.Interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			if err := wsjson.Write(ctx, conn, stream.NextEvent()); err != nil {
+				return err
+			}
+		}
 	}
 }
