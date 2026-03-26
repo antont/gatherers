@@ -130,6 +130,84 @@ func TestStartupFoodSnapshotUsesClusteredPositions(t *testing.T) {
 	}
 }
 
+func TestRunBreakpointSearchReturnsLastGoodAndFirstBadStep(t *testing.T) {
+	steps := []BreakpointStep{
+		{Name: "good", ClientCount: 10},
+		{Name: "bad", ClientCount: 20},
+	}
+
+	callCount := 0
+	report, err := RunBreakpointSearch(context.Background(), BreakpointSearchConfig{
+		Steps: steps,
+		RunStep: func(_ context.Context, step BreakpointStep) (BreakpointStepResult, error) {
+			callCount++
+			if step.Name == "good" {
+				return BreakpointStepResult{
+					Step: step,
+					Expected: BreakpointTotals{
+						SentEvents:     120,
+						ConnectedSims:  10,
+						PickupCount:    40,
+						DropCount:      40,
+						TurnMoveCount:  40,
+						LooseFoodCount: 800,
+					},
+					Observed: BreakpointTotals{
+						SentEvents:     120,
+						ConnectedSims:  10,
+						PickupCount:    40,
+						DropCount:      40,
+						TurnMoveCount:  40,
+						LooseFoodCount: 800,
+					},
+				}, nil
+			}
+
+			return BreakpointStepResult{
+				Step: step,
+				Expected: BreakpointTotals{
+					SentEvents:     240,
+					ConnectedSims:  20,
+					PickupCount:    80,
+					DropCount:      80,
+					TurnMoveCount:  80,
+					LooseFoodCount: 1600,
+				},
+				Observed: BreakpointTotals{
+					SentEvents:     222,
+					ConnectedSims:  20,
+					PickupCount:    74,
+					DropCount:      74,
+					TurnMoveCount:  74,
+					LooseFoodCount: 1594,
+				},
+				Failure: &BreakpointFailure{
+					Kind:    BreakpointFailureExactMismatch,
+					Message: "exact totals diverged",
+				},
+			}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected breakpoint search to return structured results, got error: %v", err)
+	}
+	if callCount != 2 {
+		t.Fatalf("expected breakpoint search to stop after the first failing step, got %d calls", callCount)
+	}
+	if report.LastGood == nil || report.LastGood.Step.Name != "good" {
+		t.Fatalf("expected last good step to be recorded, got %+v", report.LastGood)
+	}
+	if report.FirstBad == nil || report.FirstBad.Step.Name != "bad" {
+		t.Fatalf("expected first bad step to be recorded, got %+v", report.FirstBad)
+	}
+	if report.FirstBad.Failure == nil || report.FirstBad.Failure.Kind != BreakpointFailureExactMismatch {
+		t.Fatalf("expected exact mismatch failure, got %+v", report.FirstBad)
+	}
+	if report.FirstBad.Expected.SentEvents != 240 || report.FirstBad.Observed.SentEvents != 222 {
+		t.Fatalf("expected sent-vs-observed totals in failure report, got %+v", report.FirstBad)
+	}
+}
+
 func mustJSON(t *testing.T, value any) string {
 	t.Helper()
 
