@@ -1,8 +1,8 @@
 use std::sync::{
-    Arc, RwLock,
+    Arc, Once, RwLock,
     atomic::{AtomicBool, Ordering},
 };
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use axum::{
     Json, Router,
@@ -15,7 +15,7 @@ use axum::{
 };
 use futures_util::StreamExt;
 use tokio::net::TcpListener;
-use tokio::sync::{Mutex, broadcast};
+use tokio::sync::{Mutex, Notify, broadcast};
 
 use crate::{
     dashboard::render_dashboard,
@@ -33,28 +33,63 @@ pub struct AppState {
 struct AppStateInner {
     store: Store,
     snapshot: RwLock<CachedSnapshot>,
-    refresh: Mutex<()>,
+    refresh: Mutex<RefreshState>,
     dirty: AtomicBool,
-    demand_seen: AtomicBool,
-    refresh_in_flight: AtomicBool,
     last_snapshot_copy_micros: std::sync::atomic::AtomicU64,
     last_snapshot_compute_micros: std::sync::atomic::AtomicU64,
+    refresh_signal: Notify,
+    worker_once: Once,
+    tuning: RefreshTuning,
     dashboard_tx: broadcast::Sender<CachedSnapshot>,
+}
+
+struct RefreshState {
+    dashboard_watchers: usize,
+    last_api_demand_at: Option<Instant>,
+    next_eligible_at: Option<Instant>,
+}
+
+#[derive(Clone, Copy)]
+struct RefreshTuning {
+    min_refresh_interval: Duration,
+    max_refresh_interval: Duration,
+    refresh_multiplier: u32,
+    api_demand_ttl: Duration,
+}
+
+impl Default for RefreshTuning {
+    fn default() -> Self {
+        Self {
+            min_refresh_interval: Duration::from_millis(250),
+            max_refresh_interval: Duration::from_secs(5),
+            refresh_multiplier: 3,
+            api_demand_ttl: Duration::from_secs(10),
+        }
+    }
 }
 
 impl AppState {
     pub fn new() -> Self {
+        Self::new_with_tuning(RefreshTuning::default())
+    }
+
+    fn new_with_tuning(tuning: RefreshTuning) -> Self {
         let (dashboard_tx, _) = broadcast::channel(32);
         Self {
             inner: Arc::new(AppStateInner {
                 store: Store::default(),
                 snapshot: RwLock::new(CachedSnapshot::default()),
-                refresh: Mutex::new(()),
+                refresh: Mutex::new(RefreshState {
+                    dashboard_watchers: 0,
+                    last_api_demand_at: None,
+                    next_eligible_at: None,
+                }),
                 dirty: AtomicBool::new(false),
-                demand_seen: AtomicBool::new(false),
-                refresh_in_flight: AtomicBool::new(false),
                 last_snapshot_copy_micros: std::sync::atomic::AtomicU64::new(0),
                 last_snapshot_compute_micros: std::sync::atomic::AtomicU64::new(0),
+                refresh_signal: Notify::new(),
+                worker_once: Once::new(),
+                tuning,
                 dashboard_tx,
             }),
         }
@@ -66,7 +101,8 @@ impl AppState {
             .apply_event(&envelope)?;
 
         self.inner.dirty.store(true, Ordering::SeqCst);
-        self.try_spawn_refresh();
+        self.ensure_worker();
+        self.signal_refresh();
         Ok(())
     }
 
@@ -79,70 +115,129 @@ impl AppState {
     }
 
     async fn register_api_demand(&self) {
-        let _refresh_gate = self.inner.refresh.lock().await;
-        self.inner.demand_seen.store(true, Ordering::SeqCst);
-        self.try_spawn_refresh();
+        let mut refresh = self.inner.refresh.lock().await;
+        refresh.last_api_demand_at = Some(Instant::now());
+        drop(refresh);
+        self.ensure_worker();
+        self.signal_refresh();
     }
 
     async fn add_dashboard_watcher(&self) -> broadcast::Receiver<CachedSnapshot> {
         let receiver = self.inner.dashboard_tx.subscribe();
-        self.register_api_demand().await;
+        let mut refresh = self.inner.refresh.lock().await;
+        refresh.dashboard_watchers += 1;
+        drop(refresh);
+        self.ensure_worker();
+        self.signal_refresh();
         receiver
+    }
+
+    async fn remove_dashboard_watcher(&self) {
+        let mut refresh = self.inner.refresh.lock().await;
+        refresh.dashboard_watchers = refresh.dashboard_watchers.saturating_sub(1);
     }
 
     fn spawn_refresh(&self) {
         let state = self.clone();
         tokio::spawn(async move {
-            state.inner.dirty.store(false, Ordering::SeqCst);
-            let copy_started = Instant::now();
-            let snapshot_data = {
-                state
-                    .inner
-                    .store
-                    .snapshot_data()
-            };
-            state
-                .inner
-                .last_snapshot_copy_micros
-                .store(copy_started.elapsed().as_micros() as u64, Ordering::SeqCst);
-            let compute_started = Instant::now();
-            let snapshot = tokio::task::spawn_blocking(move || snapshot_data.into_cached_snapshot())
-                .await
-                .expect("snapshot compute task should join");
-            state
-                .inner
-                .last_snapshot_compute_micros
-                .store(compute_started.elapsed().as_micros() as u64, Ordering::SeqCst);
-            {
-                let mut snapshot_guard = state
-                    .inner
-                    .snapshot
-                    .write()
-                    .expect("snapshot lock poisoned");
-                *snapshot_guard = snapshot.clone();
-            }
-            let _ = state.inner.dashboard_tx.send(snapshot);
-            state
-                .inner
-                .refresh_in_flight
-                .store(false, Ordering::SeqCst);
-            state.try_spawn_refresh();
+            state.run_refresh_worker().await;
         });
     }
 
-    fn try_spawn_refresh(&self) {
-        if !self.inner.dirty.load(Ordering::SeqCst) || !self.inner.demand_seen.load(Ordering::SeqCst)
-        {
-            return;
+    fn ensure_worker(&self) {
+        let state = self.clone();
+        self.inner.worker_once.call_once(move || {
+            state.spawn_refresh();
+        });
+    }
+
+    fn signal_refresh(&self) {
+        self.inner.refresh_signal.notify_one();
+    }
+
+    async fn run_refresh_worker(self) {
+        loop {
+            self.inner.refresh_signal.notified().await;
+            loop {
+                let now = Instant::now();
+                let plan = self.next_refresh_plan(now).await;
+                let Some(delay) = plan else {
+                    break;
+                };
+
+                if !delay.is_zero() {
+                    tokio::select! {
+                        _ = tokio::time::sleep(delay) => {}
+                        _ = self.inner.refresh_signal.notified() => {
+                            continue;
+                        }
+                    }
+                }
+
+                if !self.inner.dirty.swap(false, Ordering::SeqCst) {
+                    continue;
+                }
+
+                let copy_started = Instant::now();
+                let snapshot_data = self.inner.store.snapshot_data();
+                self.inner
+                    .last_snapshot_copy_micros
+                    .store(copy_started.elapsed().as_micros() as u64, Ordering::SeqCst);
+                let compute_started = Instant::now();
+                let snapshot = tokio::task::spawn_blocking(move || snapshot_data.into_cached_snapshot())
+                    .await
+                    .expect("snapshot compute task should join");
+                let compute_duration = compute_started.elapsed();
+                self.inner
+                    .last_snapshot_compute_micros
+                    .store(compute_duration.as_micros() as u64, Ordering::SeqCst);
+                {
+                    let mut snapshot_guard = self
+                        .inner
+                        .snapshot
+                        .write()
+                        .expect("snapshot lock poisoned");
+                    *snapshot_guard = snapshot.clone();
+                }
+                let _ = self.inner.dashboard_tx.send(snapshot);
+                let mut refresh = self.inner.refresh.lock().await;
+                refresh.next_eligible_at =
+                    Some(Instant::now() + self.adaptive_refresh_interval(compute_duration));
+            }
         }
-        if self
-            .inner
-            .refresh_in_flight
-            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-            .is_ok()
-        {
-            self.spawn_refresh();
+    }
+
+    async fn next_refresh_plan(&self, now: Instant) -> Option<Duration> {
+        let refresh = self.inner.refresh.lock().await;
+        if !self.has_demand_locked(&refresh, now) || !self.inner.dirty.load(Ordering::SeqCst) {
+            return None;
         }
+        match refresh.next_eligible_at {
+            Some(next) if next > now => Some(next.duration_since(now)),
+            _ => Some(Duration::ZERO),
+        }
+    }
+
+    fn has_demand_locked(&self, refresh: &RefreshState, now: Instant) -> bool {
+        if refresh.dashboard_watchers > 0 {
+            return true;
+        }
+        refresh
+            .last_api_demand_at
+            .map(|at| now.duration_since(at) <= self.inner.tuning.api_demand_ttl)
+            .unwrap_or(false)
+    }
+
+    fn adaptive_refresh_interval(&self, compute_duration: Duration) -> Duration {
+        let mut interval =
+            compute_duration.saturating_mul(self.inner.tuning.refresh_multiplier);
+        if interval < self.inner.tuning.min_refresh_interval {
+            interval = self.inner.tuning.min_refresh_interval;
+        }
+        if interval > self.inner.tuning.max_refresh_interval {
+            interval = self.inner.tuning.max_refresh_interval;
+        }
+        interval
     }
 }
 
@@ -236,9 +331,10 @@ async fn handle_dashboard_socket(state: AppState, mut socket: WebSocket) {
             .await
             .is_err()
         {
-            return;
+            break;
         }
     }
+    state.remove_dashboard_watcher().await;
 }
 
 #[cfg(test)]
@@ -248,7 +344,7 @@ mod tests {
         time::{Duration, Instant},
     };
 
-    use super::AppState;
+    use super::{AppState, RefreshTuning};
     use crate::protocol::{
         EventEnvelope, EventPayload, FoodSnapshotPayload, HelloPayload, StartupFoodPayload,
     };
@@ -361,8 +457,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn unrelated_sim_writes_do_not_block_on_global_store_contention() {
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn unrelated_sim_writes_do_not_block_on_global_store_contention() {
         let state = AppState::new();
         state
             .apply_event(EventEnvelope {
@@ -513,5 +609,166 @@ mod tests {
             runtime_made_progress,
             "heavy refresh compute should not starve unrelated runtime progress"
         );
+    }
+
+    #[tokio::test]
+    async fn api_demand_expires_before_later_dirty_events_refresh_snapshot() {
+        let state = AppState::new_with_tuning(RefreshTuning {
+            min_refresh_interval: Duration::ZERO,
+            max_refresh_interval: Duration::ZERO,
+            refresh_multiplier: 1,
+            api_demand_ttl: Duration::from_millis(30),
+        });
+
+        state
+            .apply_event(EventEnvelope {
+                event_type: "sim_hello".into(),
+                sim_id: "sim-demand-expiry".into(),
+                seq: 1,
+                timestamp_ms: 0,
+                payload: EventPayload::SimHello(HelloPayload {
+                    sim_name: "sim-demand-expiry".into(),
+                    source: "test".into(),
+                    session_started_ms: 0,
+                    world_width: 1280.0,
+                    world_height: 720.0,
+                    ant_count: 26,
+                    food_count: 1,
+                }),
+            })
+            .expect("sim hello should be accepted");
+        state
+            .apply_event(EventEnvelope {
+                event_type: "food_drop".into(),
+                sim_id: "sim-demand-expiry".into(),
+                seq: 2,
+                timestamp_ms: 0,
+                payload: EventPayload::FoodDrop(crate::protocol::FoodDropPayload {
+                    ant_id: Some("ant-1".into()),
+                    food_id: "food-1".into(),
+                    x: 1.0,
+                    y: 1.0,
+                    direction_x: Some(0.0),
+                    direction_y: Some(1.0),
+                    frame: Some(2),
+                }),
+            })
+            .expect("food drop should be accepted");
+
+        state.register_api_demand().await;
+        wait_for_loose_food_count(&state, 1).await;
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        state
+            .apply_event(EventEnvelope {
+                event_type: "food_drop".into(),
+                sim_id: "sim-demand-expiry".into(),
+                seq: 3,
+                timestamp_ms: 0,
+                payload: EventPayload::FoodDrop(crate::protocol::FoodDropPayload {
+                    ant_id: Some("ant-1".into()),
+                    food_id: "food-2".into(),
+                    x: 2.0,
+                    y: 2.0,
+                    direction_x: Some(0.0),
+                    direction_y: Some(1.0),
+                    frame: Some(3),
+                }),
+            })
+            .expect("second food drop should be accepted");
+
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert_eq!(state.current_snapshot().summary.loose_food_count, 1);
+
+        state.register_api_demand().await;
+        wait_for_loose_food_count(&state, 2).await;
+    }
+
+    #[tokio::test]
+    async fn active_demand_refreshes_are_cadence_limited() {
+        let state = AppState::new_with_tuning(RefreshTuning {
+            min_refresh_interval: Duration::from_millis(60),
+            max_refresh_interval: Duration::from_millis(60),
+            refresh_multiplier: 1,
+            api_demand_ttl: Duration::from_secs(1),
+        });
+
+        state
+            .apply_event(EventEnvelope {
+                event_type: "sim_hello".into(),
+                sim_id: "sim-cadence".into(),
+                seq: 1,
+                timestamp_ms: 0,
+                payload: EventPayload::SimHello(HelloPayload {
+                    sim_name: "sim-cadence".into(),
+                    source: "test".into(),
+                    session_started_ms: 0,
+                    world_width: 1280.0,
+                    world_height: 720.0,
+                    ant_count: 26,
+                    food_count: 1,
+                }),
+            })
+            .expect("sim hello should be accepted");
+        state
+            .apply_event(EventEnvelope {
+                event_type: "food_drop".into(),
+                sim_id: "sim-cadence".into(),
+                seq: 2,
+                timestamp_ms: 0,
+                payload: EventPayload::FoodDrop(crate::protocol::FoodDropPayload {
+                    ant_id: Some("ant-1".into()),
+                    food_id: "food-1".into(),
+                    x: 1.0,
+                    y: 1.0,
+                    direction_x: Some(0.0),
+                    direction_y: Some(1.0),
+                    frame: Some(2),
+                }),
+            })
+            .expect("initial food drop should be accepted");
+
+        state.register_api_demand().await;
+        wait_for_loose_food_count(&state, 1).await;
+
+        state
+            .apply_event(EventEnvelope {
+                event_type: "food_drop".into(),
+                sim_id: "sim-cadence".into(),
+                seq: 3,
+                timestamp_ms: 0,
+                payload: EventPayload::FoodDrop(crate::protocol::FoodDropPayload {
+                    ant_id: Some("ant-1".into()),
+                    food_id: "food-2".into(),
+                    x: 2.0,
+                    y: 2.0,
+                    direction_x: Some(0.0),
+                    direction_y: Some(1.0),
+                    frame: Some(3),
+                }),
+            })
+            .expect("second food drop should be accepted");
+
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert_eq!(state.current_snapshot().summary.loose_food_count, 1);
+
+        wait_for_loose_food_count(&state, 2).await;
+    }
+
+    async fn wait_for_loose_food_count(state: &AppState, expected: usize) {
+        let deadline = tokio::time::Instant::now() + Duration::from_millis(250);
+        loop {
+            let snapshot = state.current_snapshot();
+            if snapshot.summary.loose_food_count == expected {
+                return;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "expected loose_food_count={expected}, last snapshot was {:?}",
+                snapshot.summary
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
     }
 }

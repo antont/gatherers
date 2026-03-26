@@ -63,22 +63,28 @@ Fresh run detail:
 
 - observed totals at `100`: `SentEvents=52 ConnectedSims=6 PickupCount=15 DropCount=15 TurnMoveCount=15 LooseFoodCount=80`
 
-## Interpretation
+## Learning-First Experiment Results
 
-The important result is not whether the precise edge is `100` or `101`.
+Starting from the baseline above, the Rust backend was then improved in four measured steps:
 
-The important result is that, under the same general workload shape and timeout budget used for the recorded Go comparison, the Rust backend hits its first timeout-bound breakpoint at roughly `100` concurrent clients on this machine.
+| Step | Change | Last good | First bad | Delta vs previous |
+|---|---|---:|---:|---:|
+| Baseline | pre-experiment reference | 99 | 100 | - |
+| 1 | async-friendly refresh coordination | 107 | 108 | +8 |
+| 2 | shard store writes by sim | 118 | 119 | +11 |
+| 3 | move snapshot compute off Tokio workers | 128 | 129 | +10 |
+| 4 | Go-style demand worker and adaptive cadence | 155 | 160 | +27 |
 
-So the current practical breakpoint for this exact local run was:
+The biggest single move came from step 4.
 
-- around `100` concurrent clients
+That matters because it means the Rust backend was not only paying for low-level locking and runtime-thread placement. The refresh policy itself was a major part of the gap.
 
-More precisely, this means:
+After the full learning-first sequence, the current practical breakpoint for this workload on this machine is:
 
-- at `99`, the step completed and the backend caught up within the configured window
-- at `100` or `101`, depending on the sweep, the step no longer became observable through the backend within the configured window
+- last good: `155`
+- first bad: `160`
 
-The small wobble between `99`, `100`, and `101` should be treated as expected edge variance for this style of timeout-bound load search, especially because each step adds state to the same running backend process.
+That is a large improvement over the original `99-100` baseline, but it still trails the current Go result on the same workload.
 
 ## Failure Shape
 
@@ -101,7 +107,7 @@ not yet as:
 
 - a proven minimal event-loss breakpoint under unlimited wait
 
-## Commands Used
+## Baseline Commands Used
 
 Coarse search:
 
@@ -155,19 +161,51 @@ The recorded Go note in `docs/go-backend-breakpoint-findings.md` reached:
 - last good: `268` clients
 - first bad: `269` clients
 
-The recorded Rust runs here reached roughly:
+The final measured Rust result after the learning-first sequence reached:
 
-- last good: about `99-100` clients
-- first bad: about `100-101` clients
+- last good: `155` clients
+- first bad: `160` clients
 
-So, for this workload on this machine, the current Go backend clearly outperforms the current Rust backend.
+So, for this workload on this machine, the current Go backend still clearly outperforms the current Rust backend, but the gap is now much smaller than it was at the original baseline.
+
+## Commands Used
+
+Final coarse search after Go-style cadence:
+
+```bash
+cd backend
+go run ./cmd/breakpoint \
+  --base-url http://127.0.0.1:18237 \
+  --start-clients 125 \
+  --max-clients 250 \
+  --step 25 \
+  --timeout 220s \
+  --send-timeout 30s \
+  --settle-timeout 30s \
+  --stall-timeout 5s
+```
+
+Final narrowing pass after Go-style cadence:
+
+```bash
+cd backend
+go run ./cmd/breakpoint \
+  --base-url http://127.0.0.1:18238 \
+  --start-clients 150 \
+  --max-clients 175 \
+  --step 5 \
+  --timeout 220s \
+  --send-timeout 30s \
+  --settle-timeout 30s \
+  --stall-timeout 5s
+```
 
 ## What To Vary Next
 
 If future runs want more insight instead of just one threshold, the next useful experiments are:
 
-- repeat the Rust search with multiple fresh backend starts per point to reduce edge variance
+- repeat the final Rust search with multiple fresh backend starts per point to reduce edge variance
 - vary `activity-triplets` to separate sustained event pressure from connection count
 - vary `startup-food-count` to isolate startup payload pressure
 - vary `interval` to separate message rate from concurrency
-- profile the Rust backend during the failing `100-110` range to find the next dominant bottleneck after the snapshot-lock fix
+- profile the Rust backend during the failing `155-160` range to find the next dominant bottleneck after cadence matching
