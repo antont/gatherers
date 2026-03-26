@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -102,5 +103,72 @@ func TestSummaryReflectsEventsIngestedOverWebSocket(t *testing.T) {
 
 	if summary.LooseFoodCount != 1 {
 		t.Fatalf("expected 1 loose food item after two drops and one pickup, got %d", summary.LooseFoodCount)
+	}
+}
+
+func TestDashboardShowsConnectedSimAndLooseFoodCounts(t *testing.T) {
+	srv := New(config.Config{})
+	testServer := httptest.NewServer(srv.Handler())
+	defer testServer.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	wsURL := strings.Replace(testServer.URL, "http://", "ws://", 1) + "/ws/ingest"
+	conn, _, err := websocket.Dial(ctx, wsURL, nil)
+	if err != nil {
+		t.Fatalf("expected websocket ingest endpoint to accept connection: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	events := []map[string]any{
+		{
+			"type":         "sim_hello",
+			"sim_id":       "sim-dashboard",
+			"seq":          1,
+			"timestamp_ms": 1000,
+			"payload":      map[string]any{"sim_name": "dashboard"},
+		},
+		{
+			"type":         "food_drop",
+			"sim_id":       "sim-dashboard",
+			"seq":          2,
+			"timestamp_ms": 1001,
+			"payload": map[string]any{
+				"food_id": "food-1",
+				"x":       25.0,
+				"y":       25.0,
+			},
+		},
+	}
+
+	for _, event := range events {
+		if err := wsjson.Write(ctx, conn, event); err != nil {
+			t.Fatalf("expected event %#v to be accepted over websocket: %v", event["type"], err)
+		}
+	}
+
+	resp, err := http.Get(testServer.URL + "/")
+	if err != nil {
+		t.Fatalf("expected dashboard endpoint to respond: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected dashboard status %d, got %d", http.StatusOK, resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("expected dashboard body to be readable: %v", err)
+	}
+
+	bodyText := string(body)
+	if !strings.Contains(bodyText, "Connected sims") {
+		t.Fatalf("expected dashboard to describe connected sims, body was %q", bodyText)
+	}
+
+	if !strings.Contains(bodyText, "1") {
+		t.Fatalf("expected dashboard to include the connected sim or loose food counts, body was %q", bodyText)
 	}
 }
