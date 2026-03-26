@@ -1,4 +1,7 @@
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{
+    Arc, RwLock,
+    atomic::{AtomicBool, Ordering},
+};
 
 use axum::{
     Json, Router,
@@ -11,7 +14,7 @@ use axum::{
 };
 use futures_util::StreamExt;
 use tokio::net::TcpListener;
-use tokio::sync::broadcast;
+use tokio::sync::{Mutex, broadcast};
 
 use crate::{
     dashboard::render_dashboard,
@@ -29,15 +32,11 @@ pub struct AppState {
 struct AppStateInner {
     store: RwLock<Store>,
     snapshot: RwLock<CachedSnapshot>,
-    refresh: Mutex<RefreshState>,
+    refresh: Mutex<()>,
+    dirty: AtomicBool,
+    demand_seen: AtomicBool,
+    refresh_in_flight: AtomicBool,
     dashboard_tx: broadcast::Sender<CachedSnapshot>,
-}
-
-#[derive(Default)]
-struct RefreshState {
-    dirty: bool,
-    demand_seen: bool,
-    refresh_in_flight: bool,
 }
 
 impl AppState {
@@ -47,7 +46,10 @@ impl AppState {
             inner: Arc::new(AppStateInner {
                 store: RwLock::new(Store::default()),
                 snapshot: RwLock::new(CachedSnapshot::default()),
-                refresh: Mutex::new(RefreshState::default()),
+                refresh: Mutex::new(()),
+                dirty: AtomicBool::new(false),
+                demand_seen: AtomicBool::new(false),
+                refresh_in_flight: AtomicBool::new(false),
                 dashboard_tx,
             }),
         }
@@ -60,19 +62,8 @@ impl AppState {
             .expect("store lock poisoned")
             .apply_event(&envelope)?;
 
-        let should_spawn = {
-            let mut refresh = self.inner.refresh.lock().expect("refresh lock poisoned");
-            refresh.dirty = true;
-            if refresh.demand_seen && !refresh.refresh_in_flight {
-                refresh.refresh_in_flight = true;
-                true
-            } else {
-                false
-            }
-        };
-        if should_spawn {
-            self.spawn_refresh();
-        }
+        self.inner.dirty.store(true, Ordering::SeqCst);
+        self.try_spawn_refresh();
         Ok(())
     }
 
@@ -84,32 +75,22 @@ impl AppState {
             .clone()
     }
 
-    fn register_api_demand(&self) {
-        let should_spawn = {
-            let mut refresh = self.inner.refresh.lock().expect("refresh lock poisoned");
-            refresh.demand_seen = true;
-            if refresh.dirty && !refresh.refresh_in_flight {
-                refresh.refresh_in_flight = true;
-                true
-            } else {
-                false
-            }
-        };
-
-        if should_spawn {
-            self.spawn_refresh();
-        }
+    async fn register_api_demand(&self) {
+        let _refresh_gate = self.inner.refresh.lock().await;
+        self.inner.demand_seen.store(true, Ordering::SeqCst);
+        self.try_spawn_refresh();
     }
 
-    fn add_dashboard_watcher(&self) -> broadcast::Receiver<CachedSnapshot> {
+    async fn add_dashboard_watcher(&self) -> broadcast::Receiver<CachedSnapshot> {
         let receiver = self.inner.dashboard_tx.subscribe();
-        self.register_api_demand();
+        self.register_api_demand().await;
         receiver
     }
 
     fn spawn_refresh(&self) {
         let state = self.clone();
         tokio::spawn(async move {
+            state.inner.dirty.store(false, Ordering::SeqCst);
             let snapshot_data = {
                 state
                     .inner
@@ -128,10 +109,27 @@ impl AppState {
                 *snapshot_guard = snapshot.clone();
             }
             let _ = state.inner.dashboard_tx.send(snapshot);
-            let mut refresh = state.inner.refresh.lock().expect("refresh lock poisoned");
-            refresh.dirty = false;
-            refresh.refresh_in_flight = false;
+            state
+                .inner
+                .refresh_in_flight
+                .store(false, Ordering::SeqCst);
+            state.try_spawn_refresh();
         });
+    }
+
+    fn try_spawn_refresh(&self) {
+        if !self.inner.dirty.load(Ordering::SeqCst) || !self.inner.demand_seen.load(Ordering::SeqCst)
+        {
+            return;
+        }
+        if self
+            .inner
+            .refresh_in_flight
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
+        {
+            self.spawn_refresh();
+        }
     }
 }
 
@@ -161,13 +159,13 @@ async fn healthz() -> impl IntoResponse {
 
 async fn summary(State(state): State<AppState>) -> Json<SummaryResponse> {
     let snapshot = state.current_snapshot();
-    state.register_api_demand();
+    state.register_api_demand().await;
     Json(snapshot.summary)
 }
 
 async fn sims(State(state): State<AppState>) -> Json<Vec<SimSummaryResponse>> {
     let snapshot = state.current_snapshot();
-    state.register_api_demand();
+    state.register_api_demand().await;
     Json(snapshot.sims)
 }
 
@@ -194,7 +192,7 @@ async fn handle_ingest_socket(state: AppState, mut socket: WebSocket) {
         let Ok(event) = serde_json::from_str::<EventEnvelope>(&text) else {
             continue;
         };
-        if handle_ingest_event(&state, event).is_err() {
+        if handle_ingest_event(&state, event).await.is_err() {
             return;
         }
     }
@@ -214,7 +212,7 @@ async fn handle_dashboard_socket(state: AppState, mut socket: WebSocket) {
         return;
     }
 
-    let mut receiver = state.add_dashboard_watcher();
+    let mut receiver = state.add_dashboard_watcher().await;
     while let Ok(snapshot) = receiver.recv().await {
         if socket
             .send(Message::Text(
@@ -280,7 +278,7 @@ mod tests {
             })
             .expect("sim_food_snapshot should be accepted");
 
-        state.register_api_demand();
+        state.register_api_demand().await;
 
         let blocked_for = tokio::task::spawn_blocking({
             let state = state.clone();
@@ -315,6 +313,36 @@ mod tests {
             blocked_for < Duration::from_millis(25),
             "expected refresh to release the store lock quickly, but writes were blocked for {:?}",
             blocked_for
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn refresh_coordination_contention_does_not_block_runtime_progress() {
+        let state = AppState::new();
+        let refresh_guard = state.inner.refresh.lock().await;
+
+        let contender = {
+            let state = state.clone();
+            tokio::spawn(async move {
+                state.register_api_demand().await;
+            })
+        };
+
+        tokio::task::yield_now().await;
+
+        let ticked = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        });
+
+        let runtime_made_progress = tokio::time::timeout(Duration::from_millis(60), ticked)
+            .await
+            .is_ok();
+        drop(refresh_guard);
+        contender.await.expect("contender task should join");
+
+        assert!(
+            runtime_made_progress,
+            "refresh coordination contention should not block unrelated async progress"
         );
     }
 }
