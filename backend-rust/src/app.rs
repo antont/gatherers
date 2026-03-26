@@ -30,7 +30,7 @@ pub struct AppState {
 }
 
 struct AppStateInner {
-    store: RwLock<Store>,
+    store: Store,
     snapshot: RwLock<CachedSnapshot>,
     refresh: Mutex<()>,
     dirty: AtomicBool,
@@ -44,7 +44,7 @@ impl AppState {
         let (dashboard_tx, _) = broadcast::channel(32);
         Self {
             inner: Arc::new(AppStateInner {
-                store: RwLock::new(Store::default()),
+                store: Store::default(),
                 snapshot: RwLock::new(CachedSnapshot::default()),
                 refresh: Mutex::new(()),
                 dirty: AtomicBool::new(false),
@@ -58,8 +58,6 @@ impl AppState {
     pub fn apply_event(&self, envelope: EventEnvelope) -> Result<(), String> {
         self.inner
             .store
-            .write()
-            .expect("store lock poisoned")
             .apply_event(&envelope)?;
 
         self.inner.dirty.store(true, Ordering::SeqCst);
@@ -95,8 +93,6 @@ impl AppState {
                 state
                     .inner
                     .store
-                    .read()
-                    .expect("store lock poisoned")
                     .snapshot_data()
             };
             let snapshot = snapshot_data.into_cached_snapshot();
@@ -231,7 +227,7 @@ async fn handle_dashboard_socket(state: AppState, mut socket: WebSocket) {
 #[cfg(test)]
 mod tests {
     use std::{
-        sync::TryLockError,
+        sync::{Arc, atomic::Ordering},
         time::{Duration, Instant},
     };
 
@@ -286,17 +282,19 @@ mod tests {
                 let deadline = Instant::now() + Duration::from_secs(5);
                 let mut blocked_since: Option<Instant> = None;
                 loop {
-                    match state.inner.store.try_write() {
-                        Ok(guard) => {
+                    match state.inner.store.try_hold_shard_for_test("sim-lock") {
+                        Some(guard) => {
                             drop(guard);
                             if let Some(started_at) = blocked_since {
                                 return started_at.elapsed();
                             }
+                            if Instant::now() >= deadline {
+                                return Duration::ZERO;
+                            }
                         }
-                        Err(TryLockError::WouldBlock) => {
+                        None => {
                             blocked_since.get_or_insert_with(Instant::now);
                         }
-                        Err(TryLockError::Poisoned(_)) => panic!("store lock should not poison"),
                     }
                     assert!(
                         Instant::now() < deadline,
@@ -343,6 +341,90 @@ mod tests {
         assert!(
             runtime_made_progress,
             "refresh coordination contention should not block unrelated async progress"
+        );
+    }
+
+    #[test]
+    fn unrelated_sim_writes_do_not_block_on_global_store_contention() {
+        let state = AppState::new();
+        state
+            .apply_event(EventEnvelope {
+                event_type: "sim_hello".into(),
+                sim_id: "sim-a".into(),
+                seq: 1,
+                timestamp_ms: 0,
+                payload: EventPayload::SimHello(HelloPayload {
+                    sim_name: "sim-a".into(),
+                    source: "test".into(),
+                    session_started_ms: 0,
+                    world_width: 1280.0,
+                    world_height: 720.0,
+                    ant_count: 26,
+                    food_count: 1,
+                }),
+            })
+            .expect("sim-a hello should be accepted");
+        state
+            .apply_event(EventEnvelope {
+                event_type: "sim_hello".into(),
+                sim_id: "sim-b".into(),
+                seq: 1,
+                timestamp_ms: 0,
+                payload: EventPayload::SimHello(HelloPayload {
+                    sim_name: "sim-b".into(),
+                    source: "test".into(),
+                    session_started_ms: 0,
+                    world_width: 1280.0,
+                    world_height: 720.0,
+                    ant_count: 26,
+                    food_count: 1,
+                }),
+            })
+            .expect("sim-b hello should be accepted");
+
+        let blocked_sim = "sim-a".to_string();
+        let mut free_sim = "sim-b".to_string();
+        while state.inner.store.shard_index_for_test(&blocked_sim)
+            == state.inner.store.shard_index_for_test(&free_sim)
+        {
+            free_sim.push('x');
+        }
+
+        let store_guard = state.inner.store.hold_shard_for_test(&blocked_sim);
+        let progressed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let marker = progressed.clone();
+        let writer = std::thread::spawn({
+            let state = state.clone();
+            let free_sim = free_sim.clone();
+            move || {
+                state
+                    .apply_event(EventEnvelope {
+                        event_type: "ant_turn_move".into(),
+                        sim_id: free_sim,
+                        seq: 2,
+                        timestamp_ms: 0,
+                        payload: EventPayload::AntTurnMove(crate::protocol::TurnMovePayload {
+                            ant_id: "ant-1".into(),
+                            x: 1.0,
+                            y: 1.0,
+                            direction_x: 0.0,
+                            direction_y: 1.0,
+                            frame: 2,
+                        }),
+                    })
+                    .expect("sim-b move should be accepted");
+                marker.store(true, Ordering::SeqCst);
+            }
+        });
+
+        std::thread::sleep(Duration::from_millis(50));
+        let write_completed = progressed.load(Ordering::SeqCst);
+        drop(store_guard);
+        writer.join().expect("writer thread should join");
+
+        assert!(
+            write_completed,
+            "writing one sim should not block behind unrelated store contention"
         );
     }
 }
