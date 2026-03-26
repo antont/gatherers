@@ -2,7 +2,7 @@
 
 ## Goal
 
-Define the v1 contract between optional Rust simulation clients and the new Go backend before backend behavior is implemented.
+Define the v1 contract between optional Rust simulation clients and the backend implementation before backend behavior is implemented.
 
 This document is intentionally limited to:
 
@@ -14,9 +14,14 @@ This document is intentionally limited to:
 
 It does not define durable persistence, auth, or production deployment details.
 
+This document now serves as the shared external contract for both backend implementations in this repository:
+
+- `backend/` for Go
+- `backend-rust/` for Rust parity work
+
 ## Backend Scope
 
-The Go service is a standalone backend under `backend/` that:
+The backend service is a standalone process that:
 
 - accepts simulation events over WebSockets
 - keeps live in-memory state for connected sims
@@ -50,6 +55,8 @@ Recommended hello payload fields:
 Immediately after `sim_hello`, the client may send a startup snapshot message containing all currently loose food positions. This gives the backend an initial world view without waiting for later pickup/drop events.
 
 ## Transport
+
+The current parity target is WebSocket ingest plus HTTP readers. Native-only raw TCP may be added later, but it should reuse the same logical event envelope and differ only in framing.
 
 ### WebSocket ingest
 

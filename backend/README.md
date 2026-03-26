@@ -14,6 +14,8 @@ For a runtime-oriented view of data flow, background aggregation, and dashboard 
 
 For one recorded local breakpoint-search run and how to interpret it, see `../docs/go-backend-breakpoint-findings.md`.
 
+For the Rust parity backend, library choices, transport seam, and Go-vs-Rust comparison workflow, see `../docs/rust-backend-notes.md` and `../backend-rust/README.md`.
+
 ## Layout
 
 - `cmd/server` for the entrypoint
