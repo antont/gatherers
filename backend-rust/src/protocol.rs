@@ -24,11 +24,17 @@ pub enum EventPayload {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct HelloPayload {
     pub sim_name: String,
+    #[serde(default)]
     pub source: String,
+    #[serde(default)]
     pub session_started_ms: u64,
+    #[serde(default)]
     pub world_width: f32,
+    #[serde(default)]
     pub world_height: f32,
+    #[serde(default)]
     pub ant_count: usize,
+    #[serde(default)]
     pub food_count: usize,
 }
 
@@ -53,24 +59,34 @@ pub struct HeartbeatPayload {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct FoodPickupPayload {
-    pub ant_id: String,
+    #[serde(default)]
+    pub ant_id: Option<String>,
     pub food_id: String,
-    pub x: f32,
-    pub y: f32,
-    pub direction_x: f32,
-    pub direction_y: f32,
-    pub frame: u64,
+    #[serde(default)]
+    pub x: Option<f32>,
+    #[serde(default)]
+    pub y: Option<f32>,
+    #[serde(default)]
+    pub direction_x: Option<f32>,
+    #[serde(default)]
+    pub direction_y: Option<f32>,
+    #[serde(default)]
+    pub frame: Option<u64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct FoodDropPayload {
-    pub ant_id: String,
+    #[serde(default)]
+    pub ant_id: Option<String>,
     pub food_id: String,
     pub x: f32,
     pub y: f32,
-    pub direction_x: f32,
-    pub direction_y: f32,
-    pub frame: u64,
+    #[serde(default)]
+    pub direction_x: Option<f32>,
+    #[serde(default)]
+    pub direction_y: Option<f32>,
+    #[serde(default)]
+    pub frame: Option<u64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

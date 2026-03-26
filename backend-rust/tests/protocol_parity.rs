@@ -108,7 +108,7 @@ fn deserializes_food_pickup_and_drop_from_current_client_shape() {
         EventPayload::FoodPickup(FoodPickupPayload {
             ant_id, food_id, ..
         }) => {
-            assert_eq!(ant_id, "ant-1");
+            assert_eq!(ant_id.as_deref(), Some("ant-1"));
             assert_eq!(food_id, "food-1");
         }
         other => panic!("expected food_pickup payload, got {other:?}"),
@@ -137,7 +137,7 @@ fn deserializes_food_pickup_and_drop_from_current_client_shape() {
         EventPayload::FoodDrop(FoodDropPayload {
             ant_id, food_id, ..
         }) => {
-            assert_eq!(ant_id, "ant-1");
+            assert_eq!(ant_id.as_deref(), Some("ant-1"));
             assert_eq!(food_id, "food-1");
         }
         other => panic!("expected food_drop payload, got {other:?}"),

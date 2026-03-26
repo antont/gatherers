@@ -1,7 +1,9 @@
-use gatherers_backend_rust::config::Config;
+use gatherers_backend_rust::{app, config::Config};
 
 #[tokio::main]
 async fn main() {
     let config = Config::from_env();
-    eprintln!("gatherers-backend-rust placeholder listening config: {}", config.addr);
+    app::serve(&config.addr)
+        .await
+        .expect("rust backend server should bind and run");
 }
