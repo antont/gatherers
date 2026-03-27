@@ -86,9 +86,53 @@ After the full learning-first sequence, the current practical breakpoint for thi
 
 That is a large improvement over the original `99-100` baseline, but it still trails the current Go result on the same workload.
 
-## Failure Shape
+## Live Vs Analytics Separation Result
 
-The failing steps reported:
+After splitting cheap live ingest-derived counters from heavy analytics, the externally observed breakpoint moved dramatically again.
+
+### Initial separation measurement
+
+- strongest passing configuration in the first new sweep: `1000` clients
+- strongest passing configuration in the higher sweep: `1600` clients
+- first observed failure in the higher sweep: `1800` clients
+
+### Post-consistency-fix measurement
+
+The initial separation had correctness issues: the live cache used arithmetic deltas that could diverge from the authoritative store on duplicate or idempotent food events, and dashboard websocket subscribers missed live-only updates. After fixing those:
+
+- `Store::apply_event()` returns an `EventOutcome` with the authoritative per-sim `loose_food_count`
+- the live cache sets counts from the outcome instead of guessing with `+1` / `saturating_sub(1)`
+- every event broadcasts to dashboard websocket subscribers, not only analytics-affecting events
+- the `broadcast::Receiver` handles `Lagged` errors gracefully instead of disconnecting
+
+Measured result after the fix:
+
+- strongest passing in coarse sweep: `1200` clients
+- strongest passing in narrowing sweep: `1500` clients (all steps 1200-1500 passed)
+- strongest passing in high-range sweep: `2000` clients
+- first observed failure: `2250` clients
+
+At `2000`, the observed totals still matched exactly:
+
+- `SentEvents=124000`
+- `ConnectedSims=2000`
+- `PickupCount=40000`
+- `DropCount=40000`
+- `TurnMoveCount=40000`
+- `LooseFoodCount=160000`
+
+### Failure shape
+
+The failure at `2250` was purely connection-level:
+
+- failure kind: `client_error`
+- specific shape: many websocket dial timeouts while the load generator was still trying to open `/ws/ingest` connections
+
+No `exact_mismatch` failures were observed at any client count. Every connected client's events were correctly and promptly visible through the live counters.
+
+## Historical Failure Shape
+
+Before the live-vs-analytics separation, the failing steps reported:
 
 - failure kind: `exact_mismatch`
 - observed totals: sometimes effectively zero, and on a fresh confirmation run partial but far-from-complete progress
@@ -161,12 +205,17 @@ The recorded Go note in `docs/go-backend-breakpoint-findings.md` reached:
 - last good: `268` clients
 - first bad: `269` clients
 
-The final measured Rust result after the learning-first sequence reached:
+The learning-first Rust result before the live-vs-analytics split reached:
 
 - last good: `155` clients
 - first bad: `160` clients
 
-So, for this workload on this machine, the current Go backend still clearly outperforms the current Rust backend, but the gap is now much smaller than it was at the original baseline.
+After the live-vs-analytics split and consistency fix, the Rust backend:
+
+- matched exact live totals through `2000` clients in the measured sweep
+- first showed failure at `2250`, and that failure was `client_error` during websocket dialing rather than stale live totals
+
+The current Rust backend outperforms the recorded Go backend on the exact-count live-counter dimension that the breakpoint harness measures. The trade-off is that this measures a deliberately different architecture: live counters stay fresh while heavy analytics are allowed to lag independently.
 
 ## Commands Used
 
@@ -200,12 +249,73 @@ go run ./cmd/breakpoint \
   --stall-timeout 5s
 ```
 
+Live-vs-analytics separation sweep:
+
+```bash
+cd backend
+go run ./cmd/breakpoint \
+  --base-url http://127.0.0.1:18239 \
+  --start-clients 150 \
+  --max-clients 350 \
+  --step 25 \
+  --timeout 220s \
+  --send-timeout 30s \
+  --settle-timeout 30s \
+  --stall-timeout 5s
+```
+
+Higher-range confirmation (pre-consistency-fix):
+
+```bash
+cd backend
+go run ./cmd/breakpoint \
+  --base-url http://127.0.0.1:18239 \
+  --start-clients 1200 \
+  --max-clients 2000 \
+  --step 200 \
+  --timeout 220s \
+  --send-timeout 30s \
+  --settle-timeout 30s \
+  --stall-timeout 5s
+```
+
+Post-consistency-fix coarse sweep:
+
+```bash
+cd backend
+go run ./cmd/breakpoint \
+  --base-url http://127.0.0.1:18270 \
+  --start-clients 200 \
+  --max-clients 2000 \
+  --step 200 \
+  --timeout 300s \
+  --send-timeout 30s \
+  --settle-timeout 30s \
+  --stall-timeout 5s
+```
+
+Post-consistency-fix high-range sweep:
+
+```bash
+cd backend
+go run ./cmd/breakpoint \
+  --base-url http://127.0.0.1:18272 \
+  --start-clients 1500 \
+  --max-clients 3000 \
+  --step 250 \
+  --timeout 300s \
+  --send-timeout 30s \
+  --settle-timeout 30s \
+  --stall-timeout 5s
+```
+
 ## What To Vary Next
 
-If future runs want more insight instead of just one threshold, the next useful experiments are:
+If future runs want more insight, the next useful experiments are:
 
-- repeat the final Rust search with multiple fresh backend starts per point to reduce edge variance
+- add explicit analytics-lag measurements under the breakpoint workload, since the main live-counter bottleneck has moved far outward
+- repeat the high-range Rust search with multiple fresh backend starts per point to reduce edge variance
 - vary `activity-triplets` to separate sustained event pressure from connection count
 - vary `startup-food-count` to isolate startup payload pressure
 - vary `interval` to separate message rate from concurrency
-- profile the Rust backend during the failing `155-160` range to find the next dominant bottleneck after cadence matching
+- profile connection setup and accept backlog behavior in the `2000-2250` range, because the first observed failure is websocket dial timeout rather than stale live totals

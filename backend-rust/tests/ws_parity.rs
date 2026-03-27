@@ -21,7 +21,8 @@ async fn dashboard_websocket_receives_update_after_ingest_websocket_events() {
         .expect("dashboard websocket should connect");
 
     let initial = read_json_message(&mut dashboard_ws).await;
-    assert_eq!(initial["summary"]["connected_sim_count"], 0);
+    assert_eq!(initial["summary"]["live_summary"]["connected_sim_count"], 0);
+    assert_eq!(initial["summary"]["analytics_meta"]["is_stale"], true);
 
     let (mut ingest_ws, _) = connect_async(format!("{base_url}/ws/ingest"))
         .await
@@ -73,8 +74,10 @@ async fn dashboard_websocket_receives_update_after_ingest_websocket_events() {
         .expect("food_drop send");
 
     let update = wait_for_json_message(&mut dashboard_ws, |json| {
-        json["summary"]["connected_sim_count"] == 1
-            && json["summary"]["loose_food_count"] == 1
+        json["summary"]["live_summary"]["connected_sim_count"] == 1
+            && json["summary"]["live_summary"]["loose_food_count"] == 1
+            && json["summary"]["analytics_summary"]["occupied_cell_count"] == 1
+            && json["summary"]["analytics_meta"]["is_stale"] == false
             && json["sims"][0]["sim_id"] == "sim-dashboard"
             && json["sims"][0]["ant_count"] == 26
             && json["sims"][0]["drop_count"] == 1
@@ -82,11 +85,11 @@ async fn dashboard_websocket_receives_update_after_ingest_websocket_events() {
     })
     .await;
 
-    assert_eq!(update["summary"]["connected_sim_count"], 1);
+    assert_eq!(update["summary"]["live_summary"]["connected_sim_count"], 1);
 }
 
 #[tokio::test]
-async fn dashboard_websocket_starts_stale_then_catches_up_after_direct_ingest() {
+async fn dashboard_websocket_exposes_live_counts_immediately_then_analytics_catch_up_after_direct_ingest() {
     let state = AppState::new();
     state.apply_event(EventEnvelope {
         event_type: "sim_hello".into(),
@@ -127,19 +130,66 @@ async fn dashboard_websocket_starts_stale_then_catches_up_after_direct_ingest() 
         .expect("dashboard websocket should connect");
 
     let initial = read_json_message(&mut dashboard_ws).await;
-    assert_eq!(initial["summary"]["connected_sim_count"], 0);
-    assert_eq!(initial["summary"]["loose_food_count"], 0);
+    assert_eq!(initial["summary"]["live_summary"]["connected_sim_count"], 1);
+    assert_eq!(initial["summary"]["live_summary"]["loose_food_count"], 1);
+    assert_eq!(initial["summary"]["analytics_summary"]["occupied_cell_count"], 0);
+    assert_eq!(initial["summary"]["analytics_meta"]["is_stale"], true);
 
     let update = wait_for_json_message(&mut dashboard_ws, |json| {
-        json["summary"]["connected_sim_count"] == 1
-            && json["summary"]["loose_food_count"] == 1
+        json["summary"]["live_summary"]["connected_sim_count"] == 1
+            && json["summary"]["live_summary"]["loose_food_count"] == 1
+            && json["summary"]["analytics_summary"]["occupied_cell_count"] == 1
             && json["sims"][0]["sim_id"] == "sim-lazy-dashboard"
             && json["sims"][0]["drop_count"] == 1
             && json["sims"][0]["loose_food_count"] == 1
     })
     .await;
 
-    assert_eq!(update["summary"]["connected_sim_count"], 1);
+    assert_eq!(update["summary"]["live_summary"]["connected_sim_count"], 1);
+}
+
+#[tokio::test]
+async fn dashboard_websocket_receives_live_only_updates_without_analytics_recompute() {
+    let state = AppState::new();
+    let base_url = spawn_test_server(state.clone()).await;
+
+    let (mut dashboard_ws, _) = connect_async(format!("{base_url}/ws/dashboard"))
+        .await
+        .expect("dashboard websocket should connect");
+
+    let initial = read_json_message(&mut dashboard_ws).await;
+    assert_eq!(initial["summary"]["live_summary"]["connected_sim_count"], 0);
+
+    state
+        .apply_event(EventEnvelope {
+            event_type: "sim_hello".into(),
+            sim_id: "sim-live-only".into(),
+            seq: 1,
+            timestamp_ms: 0,
+            payload: EventPayload::SimHello(HelloPayload {
+                sim_name: "sim-live-only".into(),
+                source: "test".into(),
+                session_started_ms: 0,
+                world_width: 1280.0,
+                world_height: 720.0,
+                ant_count: 26,
+                food_count: 0,
+            }),
+        })
+        .expect("sim_hello should be accepted");
+
+    let update = tokio::time::timeout(
+        std::time::Duration::from_millis(500),
+        wait_for_json_message(&mut dashboard_ws, |json| {
+            json["summary"]["live_summary"]["connected_sim_count"] == 1
+                && json["sims"][0]["sim_id"] == "sim-live-only"
+        }),
+    )
+    .await
+    .expect("dashboard should receive live-only sim_hello update within 500ms");
+
+    assert_eq!(update["summary"]["live_summary"]["connected_sim_count"], 1);
+    assert_eq!(update["summary"]["analytics_meta"]["is_stale"], true);
 }
 
 async fn spawn_test_server(state: AppState) -> String {

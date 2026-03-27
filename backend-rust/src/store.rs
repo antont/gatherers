@@ -2,8 +2,14 @@ use std::{collections::HashMap, sync::RwLock, time::Instant};
 
 use crate::{
     protocol::{EventEnvelope, EventPayload, FoodDropPayload, FoodPickupPayload},
-    summary::{CachedSnapshot, SimSummaryResponse, SummaryResponse},
+    summary::{
+        AnalyticsSummaryResponse, CachedLiveSnapshot, LiveSummaryResponse, SimSummaryResponse,
+    },
 };
+
+pub struct EventOutcome {
+    pub sim_loose_food_count: usize,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct FoodPosition {
@@ -28,11 +34,16 @@ pub struct Store {
 }
 
 #[derive(Clone, Debug, Default)]
-pub(crate) struct DashboardSnapshotData {
+pub(crate) struct LiveSnapshotData {
     sims: Vec<SimSummaryResponse>,
-    loose_food: Vec<FoodPosition>,
     started_at: Option<Instant>,
     total_events: usize,
+    loose_food_count: usize,
+}
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct AnalyticsInputData {
+    loose_food: Vec<FoodPosition>,
     cell_size: f64,
 }
 
@@ -54,13 +65,14 @@ impl Store {
         }
     }
 
-    pub fn apply_event(&self, envelope: &EventEnvelope) -> Result<(), String> {
-        match &envelope.payload {
+    pub fn apply_event(&self, envelope: &EventEnvelope) -> Result<EventOutcome, String> {
+        let sim_loose_food_count = match &envelope.payload {
             EventPayload::SimHello(payload) => {
                 self.with_sim_state_mut(&envelope.sim_id, |state| {
                     state.record_event();
                     state.ant_count = payload.ant_count;
-                });
+                    state.loose_food.len()
+                })
             }
             EventPayload::SimFoodSnapshot(payload) => {
                 self.with_sim_state_mut(&envelope.sim_id, |state| {
@@ -78,7 +90,8 @@ impl Store {
                             )
                         })
                         .collect();
-                });
+                    state.loose_food.len()
+                })
             }
             EventPayload::FoodPickup(payload) => self.record_pickup(&envelope.sim_id, payload),
             EventPayload::FoodDrop(payload) => self.record_drop(&envelope.sim_id, payload),
@@ -86,17 +99,20 @@ impl Store {
                 self.with_sim_state_mut(&envelope.sim_id, |state| {
                     state.record_event();
                     state.turn_move_count += 1;
-                });
+                    state.loose_food.len()
+                })
             }
             EventPayload::SimHeartbeat(_) | EventPayload::SimGoodbye(_) => {
                 return Err(format!("unsupported event type: {}", envelope.event_type));
             }
-        }
-        Ok(())
+        };
+        Ok(EventOutcome {
+            sim_loose_food_count,
+        })
     }
 
-    pub fn snapshot(&self) -> CachedSnapshot {
-        self.snapshot_data().into_cached_snapshot()
+    pub fn live_snapshot(&self) -> CachedLiveSnapshot {
+        self.live_snapshot_data().into_cached_live_snapshot()
     }
 
     fn with_sim_state_mut<T>(&self, sim_id: &str, update: impl FnOnce(&mut SimState) -> T) -> T {
@@ -107,15 +123,16 @@ impl Store {
         update(state)
     }
 
-    fn record_pickup(&self, sim_id: &str, payload: &FoodPickupPayload) {
+    fn record_pickup(&self, sim_id: &str, payload: &FoodPickupPayload) -> usize {
         self.with_sim_state_mut(sim_id, |state| {
             state.record_event();
             state.loose_food.remove(&payload.food_id);
             state.pickup_count += 1;
-        });
+            state.loose_food.len()
+        })
     }
 
-    fn record_drop(&self, sim_id: &str, payload: &FoodDropPayload) {
+    fn record_drop(&self, sim_id: &str, payload: &FoodDropPayload) -> usize {
         self.with_sim_state_mut(sim_id, |state| {
             state.record_event();
             state.loose_food.insert(
@@ -126,14 +143,15 @@ impl Store {
                 },
             );
             state.drop_count += 1;
-        });
+            state.loose_food.len()
+        })
     }
 
-    pub(crate) fn snapshot_data(&self) -> DashboardSnapshotData {
+    pub(crate) fn live_snapshot_data(&self) -> LiveSnapshotData {
         let mut sims = Vec::new();
-        let mut loose_food = Vec::new();
         let mut started_at = None;
         let mut total_events = 0;
+        let mut loose_food_count = 0;
 
         for shard in &self.shards {
             let shard = shard.read().expect("store shard lock poisoned");
@@ -153,15 +171,30 @@ impl Store {
                         _ => Some(connected_at),
                     };
                 }
+                loose_food_count += sim.loose_food.len();
+            }
+        }
+
+        LiveSnapshotData {
+            sims,
+            started_at,
+            total_events,
+            loose_food_count,
+        }
+    }
+
+    pub(crate) fn analytics_input_data(&self) -> AnalyticsInputData {
+        let mut loose_food = Vec::new();
+
+        for shard in &self.shards {
+            let shard = shard.read().expect("store shard lock poisoned");
+            for sim in shard.values() {
                 loose_food.extend(sim.loose_food.values().copied());
             }
         }
 
-        DashboardSnapshotData {
-            sims,
+        AnalyticsInputData {
             loose_food,
-            started_at,
-            total_events,
             cell_size: self.cell_size,
         }
     }
@@ -202,23 +235,12 @@ impl SimState {
     }
 }
 
-impl DashboardSnapshotData {
-    fn summary(&self) -> SummaryResponse {
+impl LiveSnapshotData {
+    fn summary(&self) -> LiveSummaryResponse {
         let (elapsed_seconds, events_per_second) = self.metrics();
-        if self.loose_food.is_empty() {
-            return SummaryResponse {
-                connected_sim_count: self.sims.len(),
-                elapsed_seconds,
-                events_per_second,
-                ..SummaryResponse::default()
-            };
-        }
-
-        SummaryResponse {
+        LiveSummaryResponse {
             connected_sim_count: self.sims.len(),
-            loose_food_count: self.loose_food.len(),
-            occupied_cell_count: occupied_cell_count(&self.loose_food, self.cell_size),
-            nearest_neighbor_mean_distance: mean_nearest_neighbor_distance(&self.loose_food),
+            loose_food_count: self.loose_food_count,
             elapsed_seconds,
             events_per_second,
         }
@@ -235,10 +257,23 @@ impl DashboardSnapshotData {
         (elapsed_seconds, self.total_events as f64 / elapsed_seconds)
     }
 
-    pub(crate) fn into_cached_snapshot(self) -> CachedSnapshot {
-        CachedSnapshot {
-            summary: self.summary(),
+    pub(crate) fn into_cached_live_snapshot(self) -> CachedLiveSnapshot {
+        CachedLiveSnapshot {
+            live_summary: self.summary(),
             sims: self.sims,
+        }
+    }
+}
+
+impl AnalyticsInputData {
+    pub(crate) fn summary(&self) -> AnalyticsSummaryResponse {
+        if self.loose_food.is_empty() {
+            return AnalyticsSummaryResponse::default();
+        }
+
+        AnalyticsSummaryResponse {
+            occupied_cell_count: occupied_cell_count(&self.loose_food, self.cell_size),
+            nearest_neighbor_mean_distance: mean_nearest_neighbor_distance(&self.loose_food),
         }
     }
 }

@@ -43,8 +43,14 @@ async fn serves_empty_state_http_surface_with_dashboard_bootstrap_ids() {
         .await
         .expect("summary body");
     let summary_json: Value = serde_json::from_slice(&summary_body).expect("summary json");
-    assert_eq!(summary_json["connected_sim_count"], 0);
-    assert_eq!(summary_json["loose_food_count"], 0);
+    assert_eq!(summary_json["live_summary"]["connected_sim_count"], 0);
+    assert_eq!(summary_json["live_summary"]["loose_food_count"], 0);
+    assert_eq!(summary_json["analytics_summary"]["occupied_cell_count"], 0);
+    assert_eq!(
+        summary_json["analytics_meta"]["is_stale"],
+        true,
+        "expected analytics metadata to mark the empty bootstrap snapshot as stale"
+    );
 
     let sims = app
         .clone()
@@ -89,6 +95,9 @@ async fn serves_empty_state_http_surface_with_dashboard_bootstrap_ids() {
         "loose-food-value",
         "elapsed-seconds-value",
         "events-per-second-value",
+        "occupied-cells-value",
+        "nearest-neighbor-value",
+        "analytics-age-value",
         "sim-table-body",
         "/ws/dashboard",
     ] {
@@ -100,7 +109,7 @@ async fn serves_empty_state_http_surface_with_dashboard_bootstrap_ids() {
 }
 
 #[tokio::test]
-async fn api_summary_starts_stale_then_catches_up_after_direct_ingest() {
+async fn api_summary_exposes_live_counts_immediately_and_analytics_catch_up_after_direct_ingest() {
     let state = AppState::new();
     let app = build_router_with_state(state.clone());
 
@@ -148,19 +157,116 @@ async fn api_summary_starts_stale_then_catches_up_after_direct_ingest() {
     .expect("sim_food_snapshot should be accepted");
 
     let initial = fetch_json(&app, "/api/summary").await;
-    assert_eq!(initial["connected_sim_count"], 0);
-    assert_eq!(initial["loose_food_count"], 0);
+    assert_eq!(initial["live_summary"]["connected_sim_count"], 1);
+    assert_eq!(initial["live_summary"]["loose_food_count"], 3);
+    assert_eq!(initial["analytics_summary"]["occupied_cell_count"], 0);
+    assert_eq!(initial["analytics_meta"]["is_stale"], true);
 
     let eventually = wait_for_json(&app, "/api/summary", |json| {
-        json["connected_sim_count"] == 1
-            && json["loose_food_count"] == 3
-            && json["elapsed_seconds"].as_f64().unwrap_or_default() > 0.0
-            && json["events_per_second"].as_f64().unwrap_or_default() > 0.0
+        json["live_summary"]["connected_sim_count"] == 1
+            && json["live_summary"]["loose_food_count"] == 3
+            && json["live_summary"]["elapsed_seconds"]
+                .as_f64()
+                .unwrap_or_default()
+                > 0.0
+            && json["live_summary"]["events_per_second"]
+                .as_f64()
+                .unwrap_or_default()
+                > 0.0
+            && json["analytics_meta"]["computed_at_ms"]
+                .as_i64()
+                .unwrap_or_default()
+                > 0
+            && json["analytics_meta"]["is_stale"] == false
     })
     .await;
 
-    assert_eq!(eventually["connected_sim_count"], 1);
-    assert_eq!(eventually["loose_food_count"], 3);
+    assert_eq!(eventually["live_summary"]["connected_sim_count"], 1);
+    assert_eq!(eventually["live_summary"]["loose_food_count"], 3);
+    assert_eq!(eventually["analytics_summary"]["occupied_cell_count"], 2);
+}
+
+#[tokio::test]
+async fn api_summary_keeps_live_counts_fresh_even_when_analytics_are_stale() {
+    let state = AppState::new();
+    let app = build_router_with_state(state.clone());
+
+    state.apply_event(EventEnvelope {
+        event_type: "sim_hello".into(),
+        sim_id: "sim-live-vs-analytics".into(),
+        seq: 1,
+        timestamp_ms: 0,
+        payload: EventPayload::SimHello(HelloPayload {
+            sim_name: "sim-live-vs-analytics".into(),
+            source: "rust-bevy".into(),
+            session_started_ms: 0,
+            world_width: 1280.0,
+            world_height: 720.0,
+            ant_count: 26,
+            food_count: 1,
+        }),
+    })
+    .expect("sim_hello should be accepted");
+    state.apply_event(EventEnvelope {
+        event_type: "food_drop".into(),
+        sim_id: "sim-live-vs-analytics".into(),
+        seq: 2,
+        timestamp_ms: 0,
+        payload: EventPayload::FoodDrop(FoodDropPayload {
+            ant_id: Some("ant-1".into()),
+            food_id: "food-1".into(),
+            x: 12.0,
+            y: 18.0,
+            direction_x: Some(0.0),
+            direction_y: Some(1.0),
+            frame: Some(2),
+        }),
+    })
+    .expect("first food_drop should be accepted");
+
+    let warmed = wait_for_json(&app, "/api/summary", |json| {
+        json["live_summary"]["loose_food_count"] == 1
+            && json["analytics_summary"]["occupied_cell_count"] == 1
+            && json["analytics_meta"]["is_stale"] == false
+    })
+    .await;
+    let previous_analytics_timestamp = warmed["analytics_meta"]["computed_at_ms"]
+        .as_i64()
+        .expect("analytics timestamp");
+
+    state.apply_event(EventEnvelope {
+        event_type: "food_drop".into(),
+        sim_id: "sim-live-vs-analytics".into(),
+        seq: 3,
+        timestamp_ms: 0,
+        payload: EventPayload::FoodDrop(FoodDropPayload {
+            ant_id: Some("ant-1".into()),
+            food_id: "food-2".into(),
+            x: 22.0,
+            y: 28.0,
+            direction_x: Some(0.0),
+            direction_y: Some(1.0),
+            frame: Some(3),
+        }),
+    })
+    .expect("second food_drop should be accepted");
+
+    let split = wait_for_json(&app, "/api/summary", |json| {
+        json["live_summary"]["loose_food_count"] == 2
+            && json["analytics_summary"]["occupied_cell_count"] == 1
+            && json["analytics_meta"]["is_stale"] == true
+    })
+    .await;
+
+    assert_eq!(split["live_summary"]["loose_food_count"], 2);
+    assert_eq!(split["analytics_summary"]["occupied_cell_count"], 1);
+    assert_eq!(split["analytics_meta"]["is_stale"], true);
+    assert_eq!(
+        split["analytics_meta"]["computed_at_ms"]
+            .as_i64()
+            .expect("analytics timestamp"),
+        previous_analytics_timestamp
+    );
 }
 
 #[tokio::test]
@@ -259,7 +365,9 @@ async fn api_sims_catches_up_to_direct_ingest_counts() {
     .expect("ant_turn_move should be accepted");
 
     let initial = fetch_json(&app, "/api/sims").await;
-    assert_eq!(initial, Value::Array(vec![]));
+    let initial_sims = initial.as_array().expect("initial sims array");
+    assert_eq!(initial_sims.len(), 1);
+    assert_eq!(initial_sims[0]["sim_id"], "sim-b");
 
     let eventually = wait_for_json(&app, "/api/sims", |json| {
         json.as_array()

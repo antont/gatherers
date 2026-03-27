@@ -2,7 +2,7 @@ use std::sync::{
     Arc, Once, RwLock,
     atomic::{AtomicBool, Ordering},
 };
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use axum::{
     Json, Router,
@@ -20,9 +20,12 @@ use tokio::sync::{Mutex, Notify, broadcast};
 use crate::{
     dashboard::render_dashboard,
     ingest::handle_ingest_event,
-    protocol::EventEnvelope,
-    store::Store,
-    summary::{CachedSnapshot, SimSummaryResponse, SummaryResponse},
+    protocol::{EventEnvelope, EventPayload},
+    store::{EventOutcome, Store},
+    summary::{
+        AnalyticsMetaResponse, CachedAnalyticsSnapshot, CachedLiveSnapshot, CachedSnapshot,
+        SimSummaryResponse, SummaryResponse,
+    },
 };
 
 #[derive(Clone)]
@@ -32,9 +35,10 @@ pub struct AppState {
 
 struct AppStateInner {
     store: Store,
-    snapshot: RwLock<CachedSnapshot>,
+    live_snapshot: RwLock<LiveCacheState>,
+    analytics_snapshot: RwLock<CachedAnalyticsSnapshot>,
     refresh: Mutex<RefreshState>,
-    dirty: AtomicBool,
+    analytics_dirty: AtomicBool,
     last_snapshot_copy_micros: std::sync::atomic::AtomicU64,
     last_snapshot_compute_micros: std::sync::atomic::AtomicU64,
     refresh_signal: Notify,
@@ -47,6 +51,13 @@ struct RefreshState {
     dashboard_watchers: usize,
     last_api_demand_at: Option<Instant>,
     next_eligible_at: Option<Instant>,
+}
+
+#[derive(Clone, Debug, Default)]
+struct LiveCacheState {
+    snapshot: CachedLiveSnapshot,
+    started_at: Option<Instant>,
+    total_events: usize,
 }
 
 #[derive(Clone, Copy)]
@@ -78,13 +89,14 @@ impl AppState {
         Self {
             inner: Arc::new(AppStateInner {
                 store: Store::default(),
-                snapshot: RwLock::new(CachedSnapshot::default()),
+                live_snapshot: RwLock::new(LiveCacheState::default()),
+                analytics_snapshot: RwLock::new(CachedAnalyticsSnapshot::default()),
                 refresh: Mutex::new(RefreshState {
                     dashboard_watchers: 0,
                     last_api_demand_at: None,
                     next_eligible_at: None,
                 }),
-                dirty: AtomicBool::new(false),
+                analytics_dirty: AtomicBool::new(false),
                 last_snapshot_copy_micros: std::sync::atomic::AtomicU64::new(0),
                 last_snapshot_compute_micros: std::sync::atomic::AtomicU64::new(0),
                 refresh_signal: Notify::new(),
@@ -96,22 +108,44 @@ impl AppState {
     }
 
     pub fn apply_event(&self, envelope: EventEnvelope) -> Result<(), String> {
-        self.inner
-            .store
-            .apply_event(&envelope)?;
-
-        self.inner.dirty.store(true, Ordering::SeqCst);
-        self.ensure_worker();
-        self.signal_refresh();
+        let analytics_affected = event_affects_analytics(&envelope);
+        let outcome = self.inner.store.apply_event(&envelope)?;
+        self.apply_live_event(&envelope, &outcome);
+        let _ = self.inner.dashboard_tx.send(self.current_snapshot());
+        if analytics_affected {
+            self.mark_analytics_stale();
+            self.inner.analytics_dirty.store(true, Ordering::SeqCst);
+            self.ensure_worker();
+            self.signal_refresh();
+        }
         Ok(())
     }
 
     fn current_snapshot(&self) -> CachedSnapshot {
-        self.inner
-            .snapshot
+        let live_snapshot = self
+            .inner
+            .live_snapshot
             .read()
-            .expect("snapshot lock poisoned")
-            .clone()
+            .expect("live snapshot lock poisoned")
+            .snapshot
+            .clone();
+        let mut analytics_snapshot = self
+            .inner
+            .analytics_snapshot
+            .read()
+            .expect("analytics snapshot lock poisoned")
+            .clone();
+        analytics_snapshot.analytics_meta.age_seconds =
+            analytics_age_seconds(analytics_snapshot.analytics_meta.computed_at_ms);
+
+        CachedSnapshot {
+            summary: SummaryResponse {
+                live_summary: live_snapshot.live_summary,
+                analytics_summary: analytics_snapshot.analytics_summary,
+                analytics_meta: analytics_snapshot.analytics_meta,
+            },
+            sims: live_snapshot.sims,
+        }
     }
 
     async fn register_api_demand(&self) {
@@ -155,6 +189,61 @@ impl AppState {
         self.inner.refresh_signal.notify_one();
     }
 
+    fn apply_live_event(&self, envelope: &EventEnvelope, outcome: &EventOutcome) {
+        let mut live_cache = self
+            .inner
+            .live_snapshot
+            .write()
+            .expect("live snapshot lock poisoned");
+
+        let sim = live_cache.sim_summary_mut(&envelope.sim_id);
+        let previous_loose_food = sim.loose_food_count;
+
+        match &envelope.payload {
+            EventPayload::SimHello(payload) => {
+                sim.ant_count = payload.ant_count;
+            }
+            EventPayload::SimFoodSnapshot(_) => {}
+            EventPayload::FoodPickup(_) => {
+                sim.pickup_count += 1;
+            }
+            EventPayload::FoodDrop(_) => {
+                sim.drop_count += 1;
+            }
+            EventPayload::AntTurnMove(_) => {
+                sim.turn_move_count += 1;
+            }
+            EventPayload::SimHeartbeat(_) | EventPayload::SimGoodbye(_) => {}
+        }
+        sim.loose_food_count = outcome.sim_loose_food_count;
+        let loose_food_delta = sim.loose_food_count as isize - previous_loose_food as isize;
+
+        live_cache.total_events += 1;
+        if live_cache.started_at.is_none() {
+            live_cache.started_at = Some(Instant::now());
+        }
+        live_cache.snapshot.live_summary.connected_sim_count = live_cache.snapshot.sims.len();
+        live_cache.snapshot.live_summary.loose_food_count = live_cache
+            .snapshot
+            .live_summary
+            .loose_food_count
+            .saturating_add_signed(loose_food_delta);
+        let (elapsed_seconds, events_per_second) = live_cache.metrics();
+        live_cache.snapshot.live_summary.elapsed_seconds = elapsed_seconds;
+        live_cache.snapshot.live_summary.events_per_second = events_per_second;
+    }
+
+    fn mark_analytics_stale(&self) {
+        let mut analytics_snapshot = self
+            .inner
+            .analytics_snapshot
+            .write()
+            .expect("analytics snapshot lock poisoned");
+        analytics_snapshot.analytics_meta.is_stale = true;
+        analytics_snapshot.analytics_meta.age_seconds =
+            analytics_age_seconds(analytics_snapshot.analytics_meta.computed_at_ms);
+    }
+
     async fn run_refresh_worker(self) {
         loop {
             self.inner.refresh_signal.notified().await;
@@ -174,32 +263,41 @@ impl AppState {
                     }
                 }
 
-                if !self.inner.dirty.swap(false, Ordering::SeqCst) {
+                if !self.inner.analytics_dirty.swap(false, Ordering::SeqCst) {
                     continue;
                 }
 
                 let copy_started = Instant::now();
-                let snapshot_data = self.inner.store.snapshot_data();
+                let analytics_input = self.inner.store.analytics_input_data();
                 self.inner
                     .last_snapshot_copy_micros
                     .store(copy_started.elapsed().as_micros() as u64, Ordering::SeqCst);
                 let compute_started = Instant::now();
-                let snapshot = tokio::task::spawn_blocking(move || snapshot_data.into_cached_snapshot())
+                let analytics_summary =
+                    tokio::task::spawn_blocking(move || analytics_input.summary())
                     .await
-                    .expect("snapshot compute task should join");
+                    .expect("analytics compute task should join");
                 let compute_duration = compute_started.elapsed();
                 self.inner
                     .last_snapshot_compute_micros
                     .store(compute_duration.as_micros() as u64, Ordering::SeqCst);
                 {
-                    let mut snapshot_guard = self
+                    let stale_again = self.inner.analytics_dirty.load(Ordering::SeqCst);
+                    let mut analytics_guard = self
                         .inner
-                        .snapshot
+                        .analytics_snapshot
                         .write()
-                        .expect("snapshot lock poisoned");
-                    *snapshot_guard = snapshot.clone();
+                        .expect("analytics snapshot lock poisoned");
+                    *analytics_guard = CachedAnalyticsSnapshot {
+                        analytics_summary,
+                        analytics_meta: AnalyticsMetaResponse {
+                            computed_at_ms: unix_timestamp_ms(),
+                            age_seconds: 0.0,
+                            is_stale: stale_again,
+                        },
+                    };
                 }
-                let _ = self.inner.dashboard_tx.send(snapshot);
+                let _ = self.inner.dashboard_tx.send(self.current_snapshot());
                 let mut refresh = self.inner.refresh.lock().await;
                 refresh.next_eligible_at =
                     Some(Instant::now() + self.adaptive_refresh_interval(compute_duration));
@@ -209,7 +307,9 @@ impl AppState {
 
     async fn next_refresh_plan(&self, now: Instant) -> Option<Duration> {
         let refresh = self.inner.refresh.lock().await;
-        if !self.has_demand_locked(&refresh, now) || !self.inner.dirty.load(Ordering::SeqCst) {
+        if !self.has_demand_locked(&refresh, now)
+            || !self.inner.analytics_dirty.load(Ordering::SeqCst)
+        {
             return None;
         }
         match refresh.next_eligible_at {
@@ -239,6 +339,57 @@ impl AppState {
         }
         interval
     }
+}
+
+impl LiveCacheState {
+    fn sim_summary_mut(&mut self, sim_id: &str) -> &mut SimSummaryResponse {
+        if let Some(index) = self.snapshot.sims.iter().position(|sim| sim.sim_id == sim_id) {
+            return &mut self.snapshot.sims[index];
+        }
+        self.snapshot.sims.push(SimSummaryResponse {
+            sim_id: sim_id.to_string(),
+            ..SimSummaryResponse::default()
+        });
+        self.snapshot.sims.last_mut().expect("new sim summary")
+    }
+
+    fn metrics(&self) -> (f64, f64) {
+        let Some(started_at) = self.started_at else {
+            return (0.0, 0.0);
+        };
+        let elapsed_seconds = started_at.elapsed().as_secs_f64();
+        if elapsed_seconds <= 0.0 {
+            return (0.0, 0.0);
+        }
+        (elapsed_seconds, self.total_events as f64 / elapsed_seconds)
+    }
+}
+
+fn event_affects_analytics(envelope: &EventEnvelope) -> bool {
+    matches!(
+        envelope.payload,
+        EventPayload::SimFoodSnapshot(_)
+            | EventPayload::FoodPickup(_)
+            | EventPayload::FoodDrop(_)
+    )
+}
+
+fn unix_timestamp_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time before unix epoch")
+        .as_millis() as i64
+}
+
+fn analytics_age_seconds(computed_at_ms: i64) -> f64 {
+    if computed_at_ms <= 0 {
+        return 0.0;
+    }
+    let now_ms = unix_timestamp_ms();
+    if now_ms <= computed_at_ms {
+        return 0.0;
+    }
+    (now_ms - computed_at_ms) as f64 / 1000.0
 }
 
 pub fn build_router() -> Router {
@@ -321,17 +472,23 @@ async fn handle_dashboard_socket(state: AppState, mut socket: WebSocket) {
     }
 
     let mut receiver = state.add_dashboard_watcher().await;
-    while let Ok(snapshot) = receiver.recv().await {
-        if socket
-            .send(Message::Text(
-                serde_json::to_string(&snapshot)
-                    .expect("dashboard snapshot json")
-                    .into(),
-            ))
-            .await
-            .is_err()
-        {
-            break;
+    loop {
+        match receiver.recv().await {
+            Ok(snapshot) => {
+                if socket
+                    .send(Message::Text(
+                        serde_json::to_string(&snapshot)
+                            .expect("dashboard snapshot json")
+                            .into(),
+                    ))
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
+            }
+            Err(broadcast::error::RecvError::Lagged(_)) => continue,
+            Err(broadcast::error::RecvError::Closed) => break,
         }
     }
     state.remove_dashboard_watcher().await;
@@ -343,6 +500,8 @@ mod tests {
         sync::{Arc, atomic::Ordering},
         time::{Duration, Instant},
     };
+
+    use serde_json::Value;
 
     use super::{AppState, RefreshTuning};
     use crate::protocol::{
@@ -656,7 +815,8 @@ mod tests {
             .expect("food drop should be accepted");
 
         state.register_api_demand().await;
-        wait_for_loose_food_count(&state, 1).await;
+        wait_for_live_loose_food_count(&state, 1).await;
+        wait_for_analytics_occupied_cells(&state, 1).await;
 
         tokio::time::sleep(Duration::from_millis(50)).await;
 
@@ -679,10 +839,17 @@ mod tests {
             .expect("second food drop should be accepted");
 
         tokio::time::sleep(Duration::from_millis(20)).await;
-        assert_eq!(state.current_snapshot().summary.loose_food_count, 1);
+        let stale_snapshot = current_snapshot_json(&state);
+        assert_eq!(stale_snapshot["summary"]["live_summary"]["loose_food_count"], 2);
+        assert_eq!(
+            stale_snapshot["summary"]["analytics_summary"]["occupied_cell_count"],
+            1
+        );
+        assert_eq!(stale_snapshot["summary"]["analytics_meta"]["is_stale"], true);
 
         state.register_api_demand().await;
-        wait_for_loose_food_count(&state, 2).await;
+        wait_for_live_loose_food_count(&state, 2).await;
+        wait_for_analytics_occupied_cells(&state, 1).await;
     }
 
     #[tokio::test]
@@ -730,7 +897,8 @@ mod tests {
             .expect("initial food drop should be accepted");
 
         state.register_api_demand().await;
-        wait_for_loose_food_count(&state, 1).await;
+        wait_for_live_loose_food_count(&state, 1).await;
+        wait_for_analytics_occupied_cells(&state, 1).await;
 
         state
             .apply_event(EventEnvelope {
@@ -751,24 +919,181 @@ mod tests {
             .expect("second food drop should be accepted");
 
         tokio::time::sleep(Duration::from_millis(20)).await;
-        assert_eq!(state.current_snapshot().summary.loose_food_count, 1);
+        let stale_snapshot = current_snapshot_json(&state);
+        assert_eq!(stale_snapshot["summary"]["live_summary"]["loose_food_count"], 2);
+        assert_eq!(
+            stale_snapshot["summary"]["analytics_summary"]["occupied_cell_count"],
+            1
+        );
+        assert_eq!(stale_snapshot["summary"]["analytics_meta"]["is_stale"], true);
 
-        wait_for_loose_food_count(&state, 2).await;
+        wait_for_live_loose_food_count(&state, 2).await;
+        wait_for_analytics_occupied_cells(&state, 1).await;
     }
 
-    async fn wait_for_loose_food_count(state: &AppState, expected: usize) {
+    async fn wait_for_live_loose_food_count(state: &AppState, expected: usize) {
         let deadline = tokio::time::Instant::now() + Duration::from_millis(250);
         loop {
-            let snapshot = state.current_snapshot();
-            if snapshot.summary.loose_food_count == expected {
+            let snapshot = current_snapshot_json(state);
+            if snapshot["summary"]["live_summary"]["loose_food_count"] == expected {
                 return;
             }
             assert!(
                 tokio::time::Instant::now() < deadline,
-                "expected loose_food_count={expected}, last snapshot was {:?}",
-                snapshot.summary
+                "expected live loose_food_count={expected}, last snapshot was {snapshot:?}"
             );
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
+    }
+
+    async fn wait_for_analytics_occupied_cells(state: &AppState, expected: usize) {
+        let deadline = tokio::time::Instant::now() + Duration::from_millis(250);
+        loop {
+            let snapshot = current_snapshot_json(state);
+            if snapshot["summary"]["analytics_summary"]["occupied_cell_count"] == expected {
+                return;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "expected analytics occupied_cell_count={expected}, last snapshot was {snapshot:?}"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
+
+    fn current_snapshot_json(state: &AppState) -> Value {
+        serde_json::to_value(state.current_snapshot()).expect("snapshot json")
+    }
+
+    #[tokio::test]
+    async fn duplicate_food_drop_does_not_inflate_live_loose_food_count() {
+        let state = AppState::new();
+        state
+            .apply_event(EventEnvelope {
+                event_type: "sim_hello".into(),
+                sim_id: "sim-dup".into(),
+                seq: 1,
+                timestamp_ms: 0,
+                payload: EventPayload::SimHello(HelloPayload {
+                    sim_name: "sim-dup".into(),
+                    source: "test".into(),
+                    session_started_ms: 0,
+                    world_width: 1280.0,
+                    world_height: 720.0,
+                    ant_count: 1,
+                    food_count: 0,
+                }),
+            })
+            .expect("sim_hello");
+        state
+            .apply_event(EventEnvelope {
+                event_type: "food_drop".into(),
+                sim_id: "sim-dup".into(),
+                seq: 2,
+                timestamp_ms: 0,
+                payload: EventPayload::FoodDrop(crate::protocol::FoodDropPayload {
+                    ant_id: Some("ant-1".into()),
+                    food_id: "food-1".into(),
+                    x: 10.0,
+                    y: 20.0,
+                    direction_x: Some(0.0),
+                    direction_y: Some(1.0),
+                    frame: Some(1),
+                }),
+            })
+            .expect("first food_drop");
+        state
+            .apply_event(EventEnvelope {
+                event_type: "food_drop".into(),
+                sim_id: "sim-dup".into(),
+                seq: 3,
+                timestamp_ms: 0,
+                payload: EventPayload::FoodDrop(crate::protocol::FoodDropPayload {
+                    ant_id: Some("ant-1".into()),
+                    food_id: "food-1".into(),
+                    x: 30.0,
+                    y: 40.0,
+                    direction_x: Some(0.0),
+                    direction_y: Some(1.0),
+                    frame: Some(2),
+                }),
+            })
+            .expect("duplicate food_drop");
+
+        let snapshot = current_snapshot_json(&state);
+        assert_eq!(
+            snapshot["summary"]["live_summary"]["loose_food_count"], 1,
+            "duplicate food_drop with same food_id should not inflate live loose_food_count"
+        );
+        assert_eq!(
+            snapshot["sims"][0]["loose_food_count"], 1,
+            "per-sim loose_food_count should match store truth after duplicate food_drop"
+        );
+    }
+
+    #[tokio::test]
+    async fn pickup_of_missing_food_does_not_deflate_live_loose_food_count() {
+        let state = AppState::new();
+        state
+            .apply_event(EventEnvelope {
+                event_type: "sim_hello".into(),
+                sim_id: "sim-miss".into(),
+                seq: 1,
+                timestamp_ms: 0,
+                payload: EventPayload::SimHello(HelloPayload {
+                    sim_name: "sim-miss".into(),
+                    source: "test".into(),
+                    session_started_ms: 0,
+                    world_width: 1280.0,
+                    world_height: 720.0,
+                    ant_count: 1,
+                    food_count: 0,
+                }),
+            })
+            .expect("sim_hello");
+        state
+            .apply_event(EventEnvelope {
+                event_type: "food_drop".into(),
+                sim_id: "sim-miss".into(),
+                seq: 2,
+                timestamp_ms: 0,
+                payload: EventPayload::FoodDrop(crate::protocol::FoodDropPayload {
+                    ant_id: Some("ant-1".into()),
+                    food_id: "food-1".into(),
+                    x: 10.0,
+                    y: 20.0,
+                    direction_x: Some(0.0),
+                    direction_y: Some(1.0),
+                    frame: Some(1),
+                }),
+            })
+            .expect("food_drop");
+        state
+            .apply_event(EventEnvelope {
+                event_type: "food_pickup".into(),
+                sim_id: "sim-miss".into(),
+                seq: 3,
+                timestamp_ms: 0,
+                payload: EventPayload::FoodPickup(crate::protocol::FoodPickupPayload {
+                    ant_id: Some("ant-1".into()),
+                    food_id: "food-nonexistent".into(),
+                    x: Some(50.0),
+                    y: Some(50.0),
+                    direction_x: Some(1.0),
+                    direction_y: Some(0.0),
+                    frame: Some(2),
+                }),
+            })
+            .expect("pickup of missing food");
+
+        let snapshot = current_snapshot_json(&state);
+        assert_eq!(
+            snapshot["summary"]["live_summary"]["loose_food_count"], 1,
+            "pickup of non-existent food should not deflate live loose_food_count"
+        );
+        assert_eq!(
+            snapshot["sims"][0]["loose_food_count"], 1,
+            "per-sim loose_food_count should match store truth after pickup of missing food"
+        );
     }
 }
