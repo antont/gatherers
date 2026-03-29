@@ -1,88 +1,155 @@
 ## Purpose
 
-This note describes how the Rust backend's concurrency model ended up, why it looks the way it does, and where actor-style patterns or other refinements might still be worth considering.
+This note describes the final Rust backend concurrency model after the packed food-slot refactor and the later fix that restored the cheap live/expensive analytics split.
+
+The main point is: the backend is no longer a sharded shared-state store. It is now a hybrid of per-sim ownership, cheap published live state, and one detached analytics worker.
 
 ## Current Architecture
 
 The Rust backend is a hybrid of three concurrency styles:
 
-### Shared parallel ingest
+### Per-sim owned ingest state
 
-- `Store` uses sharded `RwLock<HashMap<String, SimState>>` for sim-level state
-- each `SimState` owns a stable `Vec<FoodSlot>` for food positions
-- `food_id` is a `usize` on the wire, used directly as a slot index -- no string parsing, no HashMap lookup per food event
-- `sim_food_snapshot` allocates the slot array once; `food_pickup` and `food_drop` mutate slots in place
-- every event takes a shard write lock, but contention is low because different sims hash to different shards
+- each sim connection uses an `Arc<SimHandle>`
+- the ingest WebSocket task caches that handle after the first event
+- steady-state events do not go through a shared map lookup
+- `SimHandle` owns per-sim counters as atomics
+- `SimHandle` owns a fixed food-slot array installed once from `sim_food_snapshot`
+- each food slot is one packed `AtomicU64`
+- `food_id` is a `usize` on the wire and is used directly as the slot index
 
-### Actor-like analytics worker
+That means the hot path for a food event is:
 
-- one background task owns refresh timing, demand tracking, and analytics computation
-- it copies lightweight input data from the store under a brief read lock, then releases the lock
-- heavy analytics (nearest-neighbor distance, occupied cell count) runs in `spawn_blocking` off the Tokio runtime
-- it publishes results into a shared analytics snapshot
+- update one packed food slot with one atomic store
+- update a few per-sim atomic counters
+- return the new per-sim live values needed by the app-layer live cache
 
-### Broadcast publication
+### Cheap published live state
 
-- live counters are derived incrementally on every ingest event using `EventOutcome` from the store
-- every event broadcasts the current snapshot to dashboard websocket subscribers via `tokio::sync::broadcast`
-- analytics snapshots are updated independently and merged into the broadcast view
+- app state owns a small `live_snapshot` cache behind `RwLock<LiveCacheState>`
+- every event updates only the touched sim row plus aggregate live counters
+- this work is O(1) per event
+- dashboard pushes read from the published live cache, not from a whole-registry scan
+
+This is the crucial split that was briefly broken and then restored:
+
+- immediate live data stays cheap
+- heavy analytics stays detached
+
+### Actor-like detached analytics worker
+
+- one background task owns refresh timing, demand tracking, and analytics publication
+- it wakes only when there is demand and analytics work is marked dirty
+- it scans packed atomic food slots through the registry
+- heavy analytics (nearest-neighbor distance, occupied cell count) runs in `spawn_blocking`
+- it publishes results into a separate analytics snapshot
+
+The analytics worker is actor-like because it has one serialized control flow that owns:
+
+- refresh cadence
+- demand state
+- staleness transitions
+- analytics publication
+
+## What The Shared Registry Still Does
+
+There is still one shared registry:
+
+- `RwLock<HashMap<String, Arc<SimHandle>>>`
+
+But its role is now much smaller than before.
+
+It is used for:
+
+- first creation of a sim handle
+- cloning all handles for analytics scans
+- occasional read-side enumeration
+
+It is **not** on the steady-state ingest hot path after a connection has cached its handle.
 
 ## Why This Shape
 
 The architecture evolved through measured experiments rather than upfront design:
 
-1. **Ingest-analytics coupling was the first bottleneck.** The original Rust backend held a store read lock during expensive analytics, starving writers. Copying raw data under a brief lock and computing outside it was the fix.
+1. **Ingest and analytics had to be decoupled first.**
+   Heavy neighbor calculations originally blocked state access and made live updates stale.
 
-2. **Async-inappropriate locking, global store contention, and CPU placement each contributed measurably.** The learning-first experiment showed that replacing `std::sync::Mutex` with atomics, sharding the store, and offloading compute to `spawn_blocking` each moved the breakpoint upward.
+2. **The per-sim food representation had to become cheaper and simpler.**
+   Replacing map-based food storage with stable slot storage removed hashing and per-event structure churn.
 
-3. **Live-analytics separation was the biggest architectural win.** Splitting cheap per-event live counters from heavy background analytics moved the breakpoint from ~160 to ~2000 clients. The failure mode shifted from stale data to TCP connection exhaustion.
+3. **The slot update itself had to become atomic as one unit.**
+   Packing `(x, y, present/absent)` into one `AtomicU64` avoided torn mixed-field reads such as new `x` with old `y`.
 
-4. **Stable food slot arrays removed the last per-event allocation in the hot path.** Replacing `HashMap<String, FoodPosition>` with `Vec<FoodSlot>` indexed by `usize` eliminated hashing, string allocation, and insert/remove overhead from every food event.
+4. **The live/analytics split had to be preserved even after the storage refactor.**
+   A temporary regression happened when watched live events rebuilt whole snapshots. The final fix restored the old idea:
+   cheap immediate live cache updates, expensive detached analytics recomputation.
 
-## What The Options Looked Like
+## What Was Actually Built
 
-Before implementation, five concurrency approaches were considered. Here is how they relate to what was actually built:
+The final design is best described as:
 
-### Option 1: Hybrid with small refinements -- this is what was built
+- **per-sim owned atomic ingest state**
+- **cheap app-layer live publication**
+- **one actor-like detached analytics worker**
 
-The current backend is essentially this option, taken further than originally expected. The sharded store, actor-like worker, and separate live/analytics caches are all refinements of the original hybrid shape.
+This is not a pure actor model and not a pure shared-memory design.
 
-### Option 2: More explicitly actor-like analysis side
+It is a practical hybrid:
 
-The analytics worker already behaves like an actor: it has serialized execution, owns its refresh policy, and publishes results. It could be made more explicit with a mailbox-style message channel, but the current `Notify` + `AtomicBool` coordination works well and the added plumbing is not currently justified.
+- per-sim writes are direct and cheap
+- live reads come from a small published cache
+- analytics reads come from the authoritative atomic slots
+- expensive math is completely off the ingest path
 
-### Option 3: Concurrent map for authoritative state
+## What Changed Relative To Earlier Notes
 
-Less relevant now. The per-sim food storage is a stable slot array with direct integer indexing. The remaining `HashMap<String, SimState>` only changes on new sim connections, not on the hot path. Replacing it with `DashMap` or similar would change very little.
+Earlier versions of this note talked about:
 
-### Option 4: Immutable published snapshots
+- sharded `RwLock<HashMap<String, SimState>>`
+- `SimState` owning a plain `Vec<FoodSlot>`
+- event-path shard write locks
 
-Partially adopted. The analytics snapshot is already computed from a copied input and published for readers. The live snapshot is updated incrementally under a write lock. Moving the live snapshot toward `Arc`-swap publication could reduce read-side contention further, but the current approach already sustains exact live counts through 1500+ concurrent clients.
+That is no longer the design.
 
-### Option 5: Full actor ownership of all state
+The important updated facts are:
 
-Not pursued. The backend's performance improved precisely because ingest writes proceed in parallel across shards. A single actor owning all state would serialize the hot path.
+- there is no shard lock on steady-state event processing
+- the sim connection writes through its cached `Arc<SimHandle>`
+- food updates are one packed atomic write
+- live state is published through a small cache
+- analytics remains detached and demand-driven
 
 ## What Might Still Be Worth Changing
 
 ### If read-side contention becomes measurable
 
-Move the published live snapshot from `RwLock<CachedLiveSnapshot>` to an `Arc`-swap or `ArcSwap` pattern. Readers would clone an `Arc` cheaply instead of holding a read lock. This is a small change that would make the read side fully lock-free.
+Move the published live snapshot from `RwLock<CachedLiveSnapshot>` to an `Arc`-swap style publication so readers can grab the latest live snapshot without taking a read lock.
 
 ### If the analytics worker needs richer coordination
 
-Introduce explicit message types (`EventApplied`, `DemandRegistered`, `Shutdown`) instead of the current `Notify` + `AtomicBool` pattern. This would make the worker easier to test as a state machine and easier to extend with new coordination triggers.
+Replace the current `Notify` + `AtomicBool` style with explicit message types such as:
 
-### If sim-level isolation matters more
+- `EventApplied`
+- `DashboardWatcherAdded`
+- `ApiDemand`
+- `Shutdown`
 
-Move each `SimState` into its own `RwLock` or even a per-sim actor, removing shard-level contention entirely. Currently the sharding is sufficient, but if per-sim write pressure becomes uneven this could help.
+That would make the worker more explicitly actor-shaped and easier to test as a state machine.
+
+### If sim lifetime management becomes more important
+
+Push more lifecycle rules into the per-sim handle layer, especially around disconnect cleanup and any future per-sim background tasks.
 
 ## Summary
 
-The Rust backend's concurrency model is:
+The Rust backend's concurrency model is now:
 
-- **parallel shared ingest** with sharded locks and stable per-sim slot arrays
-- **actor-like analytics** with demand-driven scheduling and off-runtime compute
-- **incremental live broadcast** on every event, decoupled from heavy analytics
+- **per-sim owned ingest** through cached `Arc<SimHandle>`
+- **packed atomic food-slot storage** for one-write/one-read food state
+- **cheap published live cache** updated immediately on every event
+- **actor-like detached analytics** running only in the background
 
-This was not designed upfront. It was arrived at through a sequence of measured bottleneck fixes, each committed with breakpoint evidence. The architecture works well for the current workload and has clear, small next steps if specific pressures emerge.
+This preserves the important architectural rule learned earlier:
+
+- update cheap live data immediately
+- keep expensive global analysis off the event path
