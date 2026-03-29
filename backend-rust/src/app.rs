@@ -7,13 +7,14 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use axum::{
     Json, Router,
     extract::{
-        State,
+        Query, State,
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
     response::{Html, IntoResponse},
     routing::get,
 };
 use futures_util::StreamExt;
+use serde::Deserialize;
 use tokio::net::TcpListener;
 use tokio::sync::{Mutex, Notify, broadcast};
 
@@ -23,7 +24,7 @@ use crate::{
     store::{Registry, SimHandle},
     summary::{
         AnalyticsMetaResponse, CachedAnalyticsSnapshot, CachedLiveSnapshot, CachedSnapshot,
-        SimSummaryResponse, SummaryResponse,
+        BreakpointTotalsResponse, SimSummaryResponse, SummaryResponse,
     },
 };
 
@@ -58,6 +59,16 @@ struct LiveCacheState {
     index_by_sim: HashMap<String, usize>,
     started_at: Option<Instant>,
     total_events: usize,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize)]
+struct SimsQuery {
+    limit: Option<usize>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+struct BreakpointTotalsQuery {
+    prefix: String,
 }
 
 #[derive(Clone, Copy)]
@@ -175,6 +186,67 @@ impl AppState {
         }
     }
 
+    fn current_summary(&self) -> SummaryResponse {
+        let live_summary = self
+            .inner
+            .live_snapshot
+            .read()
+            .expect("live snapshot lock poisoned")
+            .snapshot
+            .live_summary
+            .clone();
+
+        let mut analytics_snapshot = self
+            .inner
+            .analytics_snapshot
+            .read()
+            .expect("analytics snapshot lock poisoned")
+            .clone();
+        analytics_snapshot.analytics_meta.age_seconds =
+            analytics_age_seconds(analytics_snapshot.analytics_meta.computed_at_ms);
+
+        SummaryResponse {
+            live_summary,
+            analytics_summary: analytics_snapshot.analytics_summary,
+            analytics_meta: analytics_snapshot.analytics_meta,
+        }
+    }
+
+    fn current_sims(&self, limit: usize) -> Vec<SimSummaryResponse> {
+        self.inner
+            .live_snapshot
+            .read()
+            .expect("live snapshot lock poisoned")
+            .snapshot
+            .sims
+            .iter()
+            .take(limit)
+            .cloned()
+            .collect()
+    }
+
+    fn current_breakpoint_totals(&self, prefix: &str) -> BreakpointTotalsResponse {
+        self.inner
+            .live_snapshot
+            .read()
+            .expect("live snapshot lock poisoned")
+            .snapshot
+            .sims
+            .iter()
+            .filter(|sim| sim.sim_id.starts_with(prefix))
+            .fold(
+                BreakpointTotalsResponse::default(),
+                |mut totals, sim| {
+                    totals.connected_sims += 1;
+                    totals.pickup_count += sim.pickup_count;
+                    totals.drop_count += sim.drop_count;
+                    totals.turn_move_count += sim.turn_move_count;
+                    totals.loose_food_count += sim.loose_food_count;
+                    totals
+                },
+            )
+    }
+
     fn apply_live_event(&self, envelope: &EventEnvelope, outcome: &crate::store::EventOutcome) {
         let mut live_cache = self
             .inner
@@ -202,6 +274,51 @@ impl AppState {
         let (elapsed_seconds, events_per_second) = live_cache.metrics();
         live_cache.snapshot.live_summary.elapsed_seconds = elapsed_seconds;
         live_cache.snapshot.live_summary.events_per_second = events_per_second;
+    }
+
+    fn remove_live_sim(&self, sim_id: &str, removed: &SimSummaryResponse) {
+        let mut live_cache = self
+            .inner
+            .live_snapshot
+            .write()
+            .expect("live snapshot lock poisoned");
+
+        if let Some(index) = live_cache.index_by_sim.remove(sim_id) {
+            live_cache.snapshot.sims.remove(index);
+            live_cache.index_by_sim.clear();
+            let sim_ids: Vec<String> = live_cache
+                .snapshot
+                .sims
+                .iter()
+                .map(|sim| sim.sim_id.clone())
+                .collect();
+            for (new_index, sim_id) in sim_ids.into_iter().enumerate() {
+                live_cache.index_by_sim.insert(sim_id, new_index);
+            }
+            live_cache.snapshot.live_summary.connected_sim_count = live_cache.snapshot.sims.len();
+            live_cache.snapshot.live_summary.loose_food_count = live_cache
+                .snapshot
+                .live_summary
+                .loose_food_count
+                .saturating_sub(removed.loose_food_count);
+            let (elapsed_seconds, events_per_second) = live_cache.metrics();
+            live_cache.snapshot.live_summary.elapsed_seconds = elapsed_seconds;
+            live_cache.snapshot.live_summary.events_per_second = events_per_second;
+        }
+    }
+
+    fn remove_sim_handle(&self, handle: &Arc<SimHandle>) {
+        let removed = handle.sim_summary();
+        if self
+            .inner
+            .registry
+            .remove_if_same_handle(&handle.sim_id, handle)
+        {
+            self.remove_live_sim(&handle.sim_id, &removed);
+            if self.inner.dashboard_tx.receiver_count() > 0 {
+                let _ = self.inner.dashboard_tx.send(self.current_snapshot());
+            }
+        }
     }
 
     async fn register_api_demand(&self) {
@@ -425,6 +542,7 @@ pub fn build_router_with_state(state: AppState) -> Router {
         .route("/healthz", get(healthz))
         .route("/api/summary", get(summary))
         .route("/api/sims", get(sims))
+        .route("/api/breakpoint_totals", get(breakpoint_totals))
         .route("/ws/ingest", get(ingest_ws))
         .route("/ws/dashboard", get(dashboard_ws))
         .route("/", get(dashboard))
@@ -436,15 +554,30 @@ async fn healthz() -> impl IntoResponse {
 }
 
 async fn summary(State(state): State<AppState>) -> Json<SummaryResponse> {
-    let snapshot = state.current_snapshot();
+    let summary = state.current_summary();
     state.register_api_demand().await;
-    Json(snapshot.summary)
+    Json(summary)
 }
 
-async fn sims(State(state): State<AppState>) -> Json<Vec<SimSummaryResponse>> {
-    let snapshot = state.current_snapshot();
+async fn sims(
+    State(state): State<AppState>,
+    Query(query): Query<SimsQuery>,
+) -> Json<Vec<SimSummaryResponse>> {
+    let limit = match query.limit {
+        Some(0) => usize::MAX,
+        Some(limit) => limit,
+        None => 20,
+    };
+    let sims = state.current_sims(limit);
     state.register_api_demand().await;
-    Json(snapshot.sims)
+    Json(sims)
+}
+
+async fn breakpoint_totals(
+    State(state): State<AppState>,
+    Query(query): Query<BreakpointTotalsQuery>,
+) -> Json<BreakpointTotalsResponse> {
+    Json(state.current_breakpoint_totals(&query.prefix))
 }
 
 async fn dashboard(State(state): State<AppState>) -> Html<String> {
@@ -467,7 +600,7 @@ async fn handle_ingest_socket(state: AppState, mut socket: WebSocket) {
     let mut cached_handle: Option<Arc<SimHandle>> = None;
     while let Some(message_result) = socket.next().await {
         let Ok(message) = message_result else {
-            return;
+            break;
         };
         let Message::Text(text) = message else {
             continue;
@@ -478,8 +611,11 @@ async fn handle_ingest_socket(state: AppState, mut socket: WebSocket) {
         let handle = cached_handle
             .get_or_insert_with(|| state.inner.registry.get_or_create(&event.sim_id));
         if state.apply_event_with_handle(handle, event).is_err() {
-            return;
+            break;
         }
+    }
+    if let Some(handle) = cached_handle {
+        state.remove_sim_handle(&handle);
     }
 }
 

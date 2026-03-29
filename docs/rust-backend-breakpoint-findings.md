@@ -309,35 +309,65 @@ go run ./cmd/breakpoint \
   --stall-timeout 5s
 ```
 
-## Food Slot Storage Result
+## Compact Live Totals Result
 
-After replacing the per-sim `HashMap<String, FoodPosition>` with a stable `Vec<FoodSlot>` indexed by stringified slot ID, and updating the Go loadsim to emit stringified-index food IDs:
+After adding a dedicated Rust endpoint for breakpoint measurement,
+`GET /api/breakpoint_totals?prefix=...`, the harness no longer depends on:
 
-- strongest passing: `1500` clients
-- first observed failure: `1750` clients
+- `/api/sims` returning an uncapped full sim list
+- disconnected sims staying visible after the step
+- client-side aggregation over the entire table
 
-Failure shape at `1750`:
+The harness now polls compact live totals for just the active run prefix and
+keeps ingest sockets open until the exact-match wait completes. That makes the
+measurement align with the current backend design, where sims are removed on
+disconnect and `/api/sims` is intentionally capped for UI/read purposes.
+
+Validated result on this machine with the compact live-totals path:
+
+- strongest passing: `3500` clients
+- first observed failure: `3750` clients
+
+Failure shape at `3750`:
 
 - failure kind: `client_error`
-- specific shape: websocket dial timeouts while load generator was still opening `/ws/ingest` connections
-- `105` of `1750` clients failed to connect
+- specific shape: websocket dial timeouts while the load generator was still opening `/ws/ingest` connections
+- the successfully connected clients were still exactly visible through `GET /api/breakpoint_totals?prefix=...`
 
-All connected clients' events were still exactly visible through live counters. The failure mode is purely TCP connection saturation on this machine.
+So the current bottleneck exposed by the corrected measurement path is
+connection setup saturation, not stale live counters and not the old `/api/sims`
+read path.
 
-This is slightly lower than the pre-food-slot result (`2000/2250`) because the breakpoint harness does not restart the server between steps, so the `1500`-client step's accumulated state affects the `1750`-client step. A fresh-server test at `1500` would likely extend further.
+### Compact totals sweep commands
 
-### Food slot sweep command
+Validated passing sweep:
 
 ```bash
 cd backend
 go run ./cmd/breakpoint \
   --base-url http://127.0.0.1:18082 \
-  --start-clients 1500 \
-  --max-clients 3000 \
+  --start-clients 2750 \
+  --max-clients 3250 \
   --step 250 \
-  --timeout 600s \
-  --send-timeout 30s \
-  --settle-timeout 30s
+  --timeout 1200s \
+  --send-timeout 90s \
+  --settle-timeout 90s \
+  --stall-timeout 10s
+```
+
+Boundary-finding sweep:
+
+```bash
+cd backend
+go run ./cmd/breakpoint \
+  --base-url http://127.0.0.1:18082 \
+  --start-clients 3500 \
+  --max-clients 4500 \
+  --step 250 \
+  --timeout 1200s \
+  --send-timeout 90s \
+  --settle-timeout 90s \
+  --stall-timeout 10s
 ```
 
 ## What To Vary Next
@@ -349,5 +379,5 @@ If future runs want more insight, the next useful experiments are:
 - vary `activity-triplets` to separate sustained event pressure from connection count
 - vary `startup-food-count` to isolate startup payload pressure
 - vary `interval` to separate message rate from concurrency
-- profile connection setup and accept backlog behavior in the `1500-1750` range, because the first observed failure is websocket dial timeout rather than stale live totals
+- profile connection setup and accept backlog behavior in the `3500-3750` range, because the first observed failure is websocket dial timeout rather than stale live totals
 - compare food-slot storage performance against a hypothetical atomic-slot variant that eliminates shard locks for food reads

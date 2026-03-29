@@ -174,7 +174,7 @@ async fn poll_sims_until_done(
         }
 
         let response = client
-            .get(format!("{http_base_url}/api/sims"))
+            .get(format!("{http_base_url}/api/sims?limit=0"))
             .send()
             .await
             .map_err(|err| format!("api sims polling failed under load: {err}"))?;
@@ -224,7 +224,7 @@ async fn wait_for_exact_totals(http_base_url: &str) -> Totals {
 
 async fn fetch_totals(client: &reqwest::Client, http_base_url: &str) -> Totals {
     let sims: Vec<Value> = client
-        .get(format!("{http_base_url}/api/sims"))
+        .get(format!("{http_base_url}/api/sims?limit=0"))
         .send()
         .await
         .expect("api sims request should succeed")

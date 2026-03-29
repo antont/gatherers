@@ -414,6 +414,182 @@ async fn api_sims_catches_up_to_direct_ingest_counts() {
     assert_eq!(sims.len(), 1);
 }
 
+#[tokio::test]
+async fn api_sims_is_capped_to_twenty_entries() {
+    let state = AppState::new();
+    let app = build_router_with_state(state.clone());
+
+    for index in 0..25 {
+        state.apply_event(EventEnvelope {
+            event_type: "sim_hello".into(),
+            sim_id: format!("sim-{index:02}"),
+            seq: 1,
+            timestamp_ms: 0,
+            payload: EventPayload::SimHello(HelloPayload {
+                sim_name: format!("sim-{index:02}"),
+                source: "rust-bevy".into(),
+                session_started_ms: 0,
+                world_width: 1280.0,
+                world_height: 720.0,
+                ant_count: 26,
+                food_count: 0,
+            }),
+        })
+        .expect("sim_hello should be accepted");
+    }
+
+    let sims = fetch_json(&app, "/api/sims").await;
+    let sims = sims.as_array().expect("sims array");
+    assert_eq!(sims.len(), 20, "api/sims should only return the first 20 sims");
+}
+
+#[tokio::test]
+async fn breakpoint_totals_is_empty_for_unknown_prefix() {
+    let app = build_router();
+
+    let totals = fetch_json(&app, "/api/breakpoint_totals?prefix=missing").await;
+    assert_eq!(totals["connected_sims"], 0);
+    assert_eq!(totals["pickup_count"], 0);
+    assert_eq!(totals["drop_count"], 0);
+    assert_eq!(totals["turn_move_count"], 0);
+    assert_eq!(totals["loose_food_count"], 0);
+}
+
+#[tokio::test]
+async fn breakpoint_totals_aggregates_only_matching_prefix() {
+    let state = AppState::new();
+    let app = build_router_with_state(state.clone());
+
+    for sim_id in ["bp-run-1-a", "bp-run-1-b", "other-run-1"] {
+        state.apply_event(EventEnvelope {
+            event_type: "sim_hello".into(),
+            sim_id: sim_id.into(),
+            seq: 1,
+            timestamp_ms: 0,
+            payload: EventPayload::SimHello(HelloPayload {
+                sim_name: sim_id.into(),
+                source: "rust-bevy".into(),
+                session_started_ms: 0,
+                world_width: 1280.0,
+                world_height: 720.0,
+                ant_count: 26,
+                food_count: 3,
+            }),
+        })
+        .expect("sim_hello should be accepted");
+    }
+
+    for (sim_id, base_x) in [("bp-run-1-a", 10.0), ("bp-run-1-b", 20.0), ("other-run-1", 30.0)] {
+        state.apply_event(EventEnvelope {
+            event_type: "sim_food_snapshot".into(),
+            sim_id: sim_id.into(),
+            seq: 2,
+            timestamp_ms: 0,
+            payload: EventPayload::SimFoodSnapshot(FoodSnapshotPayload {
+                foods: vec![
+                    StartupFoodPayload { food_id: 0, x: base_x, y: base_x },
+                    StartupFoodPayload { food_id: 1, x: base_x + 1.0, y: base_x + 1.0 },
+                    StartupFoodPayload { food_id: 2, x: base_x + 2.0, y: base_x + 2.0 },
+                ],
+            }),
+        })
+        .expect("sim_food_snapshot should be accepted");
+    }
+
+    for (seq, sim_id) in [(3, "bp-run-1-a"), (4, "bp-run-1-b"), (5, "other-run-1")] {
+        state.apply_event(EventEnvelope {
+            event_type: "food_pickup".into(),
+            sim_id: sim_id.into(),
+            seq,
+            timestamp_ms: 0,
+            payload: EventPayload::FoodPickup(FoodPickupPayload {
+                ant_id: Some(format!("{sim_id}-ant")),
+                food_id: 0,
+                x: None,
+                y: None,
+                direction_x: None,
+                direction_y: None,
+                frame: None,
+            }),
+        })
+        .expect("food_pickup should be accepted");
+        state.apply_event(EventEnvelope {
+            event_type: "food_drop".into(),
+            sim_id: sim_id.into(),
+            seq: seq + 10,
+            timestamp_ms: 0,
+            payload: EventPayload::FoodDrop(FoodDropPayload {
+                ant_id: Some(format!("{sim_id}-ant")),
+                food_id: 0,
+                x: 99.0,
+                y: 101.0,
+                direction_x: Some(0.0),
+                direction_y: Some(1.0),
+                frame: Some(seq + 10),
+            }),
+        })
+        .expect("food_drop should be accepted");
+        state.apply_event(EventEnvelope {
+            event_type: "ant_turn_move".into(),
+            sim_id: sim_id.into(),
+            seq: seq + 20,
+            timestamp_ms: 0,
+            payload: EventPayload::AntTurnMove(TurnMovePayload {
+                ant_id: format!("{sim_id}-ant"),
+                x: 99.0,
+                y: 101.0,
+                direction_x: 0.0,
+                direction_y: 1.0,
+                frame: seq + 20,
+            }),
+        })
+        .expect("ant_turn_move should be accepted");
+    }
+
+    let totals = fetch_json(&app, "/api/breakpoint_totals?prefix=bp-run-1").await;
+    assert_eq!(totals["connected_sims"], 2);
+    assert_eq!(totals["pickup_count"], 2);
+    assert_eq!(totals["drop_count"], 2);
+    assert_eq!(totals["turn_move_count"], 2);
+    assert_eq!(totals["loose_food_count"], 6);
+}
+
+#[tokio::test]
+async fn breakpoint_totals_is_not_affected_by_sims_api_cap() {
+    let state = AppState::new();
+    let app = build_router_with_state(state.clone());
+
+    for index in 0..25 {
+        let sim_id = format!("bp-cap-{index:02}");
+        state.apply_event(EventEnvelope {
+            event_type: "sim_hello".into(),
+            sim_id: sim_id.clone(),
+            seq: 1,
+            timestamp_ms: 0,
+            payload: EventPayload::SimHello(HelloPayload {
+                sim_name: sim_id,
+                source: "rust-bevy".into(),
+                session_started_ms: 0,
+                world_width: 1280.0,
+                world_height: 720.0,
+                ant_count: 26,
+                food_count: 0,
+            }),
+        })
+        .expect("sim_hello should be accepted");
+    }
+
+    let sims = fetch_json(&app, "/api/sims").await;
+    assert_eq!(sims.as_array().expect("sims array").len(), 20);
+
+    let totals = fetch_json(&app, "/api/breakpoint_totals?prefix=bp-cap-").await;
+    assert_eq!(totals["connected_sims"], 25);
+    assert_eq!(totals["pickup_count"], 0);
+    assert_eq!(totals["drop_count"], 0);
+    assert_eq!(totals["turn_move_count"], 0);
+    assert_eq!(totals["loose_food_count"], 0);
+}
+
 async fn fetch_json<S>(app: &S, uri: &str) -> Value
 where
     S: tower::Service<Request<Body>, Response = axum::response::Response> + Clone,

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -138,30 +139,47 @@ func RunBackendBreakpointStep(ctx context.Context, step BreakpointStep) (Breakpo
 	defer cancel()
 
 	start := make(chan struct{})
+	releaseClients := make(chan struct{})
 	errCh := make(chan error, step.ClientCount)
 	totalsCh := make(chan BreakpointTotals, step.ClientCount)
-	doneCh := make(chan struct{})
+	sendDoneCh := make(chan struct{})
+	clientsDoneCh := make(chan struct{})
 	var sentCounters atomicBreakpointTotals
-	var wg sync.WaitGroup
+	var sendWG sync.WaitGroup
+	var clientWG sync.WaitGroup
 
 	for i := 0; i < step.ClientCount; i++ {
-		wg.Add(1)
+		sendWG.Add(1)
+		clientWG.Add(1)
 		go func(index int) {
-			defer wg.Done()
+			defer clientWG.Done()
 			<-start
 
-			clientTotals, err := runBreakpointClient(sendCtx, step, index, &sentCounters)
+			conn, clientTotals, err := runBreakpointClient(sendCtx, step, index, &sentCounters)
 			totalsCh <- clientTotals
 			errCh <- err
+			sendWG.Done()
+
+			if conn != nil {
+				select {
+				case <-releaseClients:
+				case <-sendCtx.Done():
+				}
+				_ = conn.Close(websocket.StatusNormalClosure, "")
+			}
 		}(i)
 	}
 
 	close(start)
 	go func() {
-		wg.Wait()
+		sendWG.Wait()
 		close(totalsCh)
 		close(errCh)
-		close(doneCh)
+		close(sendDoneCh)
+	}()
+	go func() {
+		clientWG.Wait()
+		close(clientsDoneCh)
 	}()
 
 	var lastObserved BreakpointTotals
@@ -172,7 +190,7 @@ func RunBackendBreakpointStep(ctx context.Context, step BreakpointStep) (Breakpo
 	var progressFailure *BreakpointFailure
 	for {
 		select {
-		case <-doneCh:
+		case <-sendDoneCh:
 			goto completed
 		case <-progressTicker.C:
 			observed, err := fetchBreakpointTotals(sendCtx, step.BaseURL, step.SimIDPrefix, step.InitialFoodCount)
@@ -189,11 +207,9 @@ func RunBackendBreakpointStep(ctx context.Context, step BreakpointStep) (Breakpo
 					Message: fmt.Sprintf("backend made no observable progress for %s while clients were still sending", step.StallTimeout),
 				}
 				cancel()
-				<-doneCh
 				goto completed
 			}
 		case <-sendCtx.Done():
-			<-doneCh
 			goto completed
 		}
 	}
@@ -201,6 +217,8 @@ func RunBackendBreakpointStep(ctx context.Context, step BreakpointStep) (Breakpo
 completed:
 	expected, clientErrors := collectBreakpointResults(totalsCh, errCh)
 	observed, err := waitForBreakpointTotals(sendCtx, step.BaseURL, step.SimIDPrefix, step.InitialFoodCount, expected, step.SettleTimeout)
+	close(releaseClients)
+	<-clientsDoneCh
 	if err != nil {
 		return BreakpointStepResult{}, err
 	}
@@ -304,13 +322,17 @@ func (t *atomicBreakpointTotals) SentEvents() int64 {
 	return t.sentEvents.Load()
 }
 
-func runBreakpointClient(ctx context.Context, step BreakpointStep, index int, totals *atomicBreakpointTotals) (BreakpointTotals, error) {
+func runBreakpointClient(
+	ctx context.Context,
+	step BreakpointStep,
+	index int,
+	totals *atomicBreakpointTotals,
+) (*websocket.Conn, BreakpointTotals, error) {
 	wsURL := ingestWebsocketURL(step.BaseURL)
 	conn, _, err := websocket.Dial(ctx, wsURL, nil)
 	if err != nil {
-		return BreakpointTotals{}, err
+		return nil, BreakpointTotals{}, err
 	}
-	defer conn.Close(websocket.StatusNormalClosure, "")
 
 	stream := NewClientEventStream(ClientOptions{
 		SimID:            fmt.Sprintf("%s-%03d", step.SimIDPrefix, index),
@@ -329,16 +351,17 @@ func runBreakpointClient(ctx context.Context, step BreakpointStep, index int, to
 	for i := 0; i < 2+step.ActivityTriplets*3; i++ {
 		event := stream.NextEvent()
 		if err := wsjson.Write(ctx, conn, event); err != nil {
+			_ = conn.Close(websocket.StatusNormalClosure, "")
 			if ctx.Err() != nil {
-				return local, ctx.Err()
+				return nil, local, ctx.Err()
 			}
-			return local, err
+			return nil, local, err
 		}
 		totals.record(event, step.InitialFoodCount)
 		local.record(event, step.InitialFoodCount)
 	}
 
-	return local, nil
+	return conn, local, nil
 }
 
 func (t *BreakpointTotals) record(event Event, initialFoodCount int) {
@@ -401,16 +424,17 @@ func waitForBreakpointTotals(ctx context.Context, baseURL, simIDPrefix string, i
 	return last, nil
 }
 
-type breakpointSimSummary struct {
-	SimID          string `json:"sim_id"`
-	PickupCount    int    `json:"pickup_count"`
-	DropCount      int    `json:"drop_count"`
-	TurnMoveCount  int    `json:"turn_move_count"`
-	LooseFoodCount int    `json:"loose_food_count"`
+type breakpointTotalsResponse struct {
+	ConnectedSims  int `json:"connected_sims"`
+	PickupCount    int `json:"pickup_count"`
+	DropCount      int `json:"drop_count"`
+	TurnMoveCount  int `json:"turn_move_count"`
+	LooseFoodCount int `json:"loose_food_count"`
 }
 
 func fetchBreakpointTotals(ctx context.Context, baseURL, simIDPrefix string, initialFoodCount int) (BreakpointTotals, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/api/sims", nil)
+	endpoint := fmt.Sprintf("%s/api/breakpoint_totals?prefix=%s", baseURL, url.QueryEscape(simIDPrefix))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return BreakpointTotals{}, err
 	}
@@ -421,21 +445,17 @@ func fetchBreakpointTotals(ctx context.Context, baseURL, simIDPrefix string, ini
 	}
 	defer resp.Body.Close()
 
-	var sims []breakpointSimSummary
-	if err := json.NewDecoder(resp.Body).Decode(&sims); err != nil {
+	var payload breakpointTotalsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		return BreakpointTotals{}, err
 	}
 
-	var totals BreakpointTotals
-	for _, sim := range sims {
-		if !strings.HasPrefix(sim.SimID, simIDPrefix) {
-			continue
-		}
-		totals.ConnectedSims++
-		totals.PickupCount += sim.PickupCount
-		totals.DropCount += sim.DropCount
-		totals.TurnMoveCount += sim.TurnMoveCount
-		totals.LooseFoodCount += sim.LooseFoodCount
+	totals := BreakpointTotals{
+		ConnectedSims:  payload.ConnectedSims,
+		PickupCount:    payload.PickupCount,
+		DropCount:      payload.DropCount,
+		TurnMoveCount:  payload.TurnMoveCount,
+		LooseFoodCount: payload.LooseFoodCount,
 	}
 	if initialFoodCount > 0 {
 		numerator := totals.LooseFoodCount + totals.PickupCount - totals.DropCount

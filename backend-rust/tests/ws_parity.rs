@@ -204,6 +204,64 @@ async fn dashboard_websocket_receives_live_only_updates_without_analytics_recomp
     assert_eq!(update["summary"]["analytics_meta"]["is_stale"], true);
 }
 
+#[tokio::test]
+async fn dashboard_websocket_removes_sim_after_ingest_socket_closes() {
+    let state = AppState::new();
+    let base_url = spawn_test_server(state.clone()).await;
+
+    let (mut dashboard_ws, _) = connect_async(format!("{base_url}/ws/dashboard"))
+        .await
+        .expect("dashboard websocket should connect");
+    let _initial = read_json_message(&mut dashboard_ws).await;
+
+    let (mut ingest_ws, _) = connect_async(format!("{base_url}/ws/ingest"))
+        .await
+        .expect("ingest websocket should connect");
+
+    let hello = EventEnvelope {
+        event_type: "sim_hello".into(),
+        sim_id: "sim-disconnect".into(),
+        seq: 1,
+        timestamp_ms: 0,
+        payload: EventPayload::SimHello(HelloPayload {
+            sim_name: "sim-disconnect".into(),
+            source: "rust-bevy".into(),
+            session_started_ms: 0,
+            world_width: 1280.0,
+            world_height: 720.0,
+            ant_count: 26,
+            food_count: 0,
+        }),
+    };
+    ingest_ws
+        .send(Message::Text(
+            serde_json::to_string(&hello).expect("event json").into(),
+        ))
+        .await
+        .expect("hello send");
+
+    let connected = wait_for_json_message(&mut dashboard_ws, |json| {
+        json["summary"]["live_summary"]["connected_sim_count"] == 1
+            && json["sims"][0]["sim_id"] == "sim-disconnect"
+    })
+    .await;
+    assert_eq!(connected["summary"]["live_summary"]["connected_sim_count"], 1);
+
+    ingest_ws.close(None).await.expect("ingest close should succeed");
+
+    let disconnected = tokio::time::timeout(
+        std::time::Duration::from_millis(500),
+        wait_for_json_message(&mut dashboard_ws, |json| {
+            json["summary"]["live_summary"]["connected_sim_count"] == 0
+                && json["sims"].as_array().map(|items| items.is_empty()).unwrap_or(false)
+        }),
+    )
+    .await
+    .expect("dashboard should observe sim removal after ingest socket closes");
+
+    assert_eq!(disconnected["summary"]["live_summary"]["connected_sim_count"], 0);
+}
+
 async fn spawn_test_server(state: AppState) -> String {
     let router = build_router_with_state(state);
     let listener = TcpListener::bind("127.0.0.1:0")

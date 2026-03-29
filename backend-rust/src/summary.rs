@@ -49,6 +49,15 @@ pub struct SimSummaryResponse {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
+pub struct BreakpointTotalsResponse {
+    pub connected_sims: usize,
+    pub pickup_count: usize,
+    pub drop_count: usize,
+    pub turn_move_count: usize,
+    pub loose_food_count: usize,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct CachedLiveSnapshot {
     pub live_summary: LiveSummaryResponse,
     pub sims: Vec<SimSummaryResponse>,

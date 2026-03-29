@@ -255,6 +255,17 @@ impl Registry {
         self.sims.read().expect("registry read lock poisoned").len()
     }
 
+    pub fn remove_if_same_handle(&self, sim_id: &str, handle: &Arc<SimHandle>) -> bool {
+        let mut sims = self.sims.write().expect("registry write lock poisoned");
+        match sims.get(sim_id) {
+            Some(existing) if Arc::ptr_eq(existing, handle) => {
+                sims.remove(sim_id);
+                true
+            }
+            _ => false,
+        }
+    }
+
     #[cfg(test)]
     pub fn all_handles_calls_for_test(&self) -> usize {
         self.all_handles_calls.load(Ordering::Relaxed)
