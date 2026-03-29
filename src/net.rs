@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 
 use bevy::{prelude::*, window::PrimaryWindow};
 use ewebsock::{Options, WsEvent, WsMessage, WsReceiver, WsSender};
@@ -14,6 +14,7 @@ impl Plugin for BackendClientPlugin {
         app.init_resource::<BackendClientConfig>()
             .init_resource::<PendingBackendEvents>()
             .init_resource::<BackendSequence>()
+            .init_resource::<BackendFoodSlots>()
             .add_message::<BackendSimEvent>()
             .insert_non_send_resource(BackendConnectionState::default())
             .add_systems(
@@ -77,6 +78,37 @@ impl PendingBackendEvents {
     }
 }
 
+#[derive(Resource, Default, Debug)]
+pub struct BackendFoodSlots {
+    slot_by_entity: HashMap<Entity, usize>,
+}
+
+impl BackendFoodSlots {
+    pub(crate) fn ensure_for_entities<I>(&mut self, food_entities: I)
+    where
+        I: IntoIterator<Item = Entity>,
+    {
+        let mut entities: Vec<Entity> = food_entities.into_iter().collect();
+        let already_initialized = entities.len() == self.slot_by_entity.len()
+            && entities
+                .iter()
+                .all(|entity| self.slot_by_entity.contains_key(entity));
+        if already_initialized {
+            return;
+        }
+
+        entities.sort_by_key(|entity| entity.to_bits());
+        self.slot_by_entity.clear();
+        for (slot, entity) in entities.into_iter().enumerate() {
+            self.slot_by_entity.insert(entity, slot);
+        }
+    }
+
+    pub(crate) fn slot_for(&self, entity: Entity) -> Option<usize> {
+        self.slot_by_entity.get(&entity).copied()
+    }
+}
+
 #[derive(Resource, Default)]
 struct BackendSequence(u64);
 
@@ -93,7 +125,7 @@ struct BackendConnectionState {
 pub enum BackendSimEvent {
     FoodPickup {
         ant_id: String,
-        food_id: String,
+        food_id: usize,
         x: f32,
         y: f32,
         direction_x: f32,
@@ -102,7 +134,7 @@ pub enum BackendSimEvent {
     },
     FoodDrop {
         ant_id: String,
-        food_id: String,
+        food_id: usize,
         x: f32,
         y: f32,
         direction_x: f32,
@@ -147,7 +179,7 @@ struct FoodSnapshotPayload {
 
 #[derive(Serialize)]
 struct StartupFoodPayload {
-    food_id: String,
+    food_id: usize,
     x: f32,
     y: f32,
 }
@@ -155,7 +187,7 @@ struct StartupFoodPayload {
 #[derive(Serialize)]
 struct FoodEventPayload {
     ant_id: String,
-    food_id: String,
+    food_id: usize,
     x: f32,
     y: f32,
     direction_x: f32,
@@ -220,17 +252,23 @@ fn queue_backend_food_snapshot_event(
     config: Res<BackendClientConfig>,
     mut pending: ResMut<PendingBackendEvents>,
     mut sequence: ResMut<BackendSequence>,
+    mut food_slots: ResMut<BackendFoodSlots>,
     mut connection: NonSendMut<BackendConnectionState>,
+    all_food_query: Query<Entity, With<Food>>,
     food_query: Query<(Entity, &Transform), (With<Food>, Without<ChildOf>)>,
 ) {
     if !config.is_enabled() || !connection.hello_queued || connection.food_snapshot_queued {
         return;
     }
 
+    food_slots.ensure_for_entities(all_food_query.iter());
+
     let foods = food_query
         .iter()
         .map(|(entity, transform)| StartupFoodPayload {
-            food_id: entity.to_bits().to_string(),
+            food_id: food_slots
+                .slot_for(entity)
+                .expect("food slot should exist for every food entity"),
             x: transform.translation.x,
             y: transform.translation.y,
         })

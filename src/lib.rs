@@ -13,7 +13,9 @@ use rand::Rng;
 pub use boundary::{BoundaryPlugin, BoundaryWrap, Bounding};
 pub use collision::{Collidable, CollisionPlugin, HitEvent};
 pub use config::{Colors, Config, SimulationSettings};
-pub use net::{BackendClientConfig, BackendClientPlugin, BackendSimEvent, PendingBackendEvents};
+pub use net::{
+    BackendClientConfig, BackendClientPlugin, BackendSimEvent, PendingBackendEvents,
+};
 pub use spatial_index::SpatialIndex;
 pub use ui::UiPlugin;
 
@@ -62,14 +64,19 @@ pub fn gatherer_movement(
 pub fn ant_hits_system(
     mut ant_hits: MessageReader<HitEvent<Food, Ant>>,
     mut backend_events: MessageWriter<BackendSimEvent>,
+    mut backend_food_slots: Option<ResMut<net::BackendFoodSlots>>,
     mut commands: Commands,
     mut ant_query: Query<
         (&mut Velocity, Option<&Children>, &Transform),
         (With<Ant>, Without<Cooldown>),
     >,
+    food_entities: Query<Entity, With<Food>>,
     mut food_query: Query<&mut Transform, (With<Food>, Without<Ant>)>,
 ) {
     let mut rng = rand::rng();
+    if let Some(food_slots) = backend_food_slots.as_mut() {
+        food_slots.ensure_for_entities(food_entities.iter());
+    }
 
     for hit in ant_hits.read() {
         let ant = hit.hitter();
@@ -104,7 +111,10 @@ pub fn ant_hits_system(
                     let new_direction = Vec2::new(angle.cos(), angle.sin());
                     *velocity = Velocity(new_direction);
                     let ant_id = ant.to_bits().to_string();
-                    let food_id = carried_food.to_bits().to_string();
+                    let food_id = backend_food_slots
+                        .as_ref()
+                        .and_then(|food_slots| food_slots.slot_for(carried_food))
+                        .unwrap_or(carried_food.to_bits() as usize);
                     backend_events.write(BackendSimEvent::FoodDrop {
                         ant_id: ant_id.clone(),
                         food_id,
@@ -147,7 +157,10 @@ pub fn ant_hits_system(
                 let new_direction = Vec2::new(angle.cos(), angle.sin());
                 *velocity = Velocity(new_direction);
                 let ant_id = ant.to_bits().to_string();
-                let food_id = food.to_bits().to_string();
+                let food_id = backend_food_slots
+                    .as_ref()
+                    .and_then(|food_slots| food_slots.slot_for(food))
+                    .unwrap_or(food.to_bits() as usize);
                 backend_events.write(BackendSimEvent::FoodPickup {
                     ant_id: ant_id.clone(),
                     food_id,

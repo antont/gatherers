@@ -2,6 +2,7 @@ use an_gatherers::collision::{initialize_hittables, update_hittable_positions};
 use an_gatherers::spatial_index::SpatialIndex;
 use an_gatherers::*;
 use bevy::prelude::*;
+use serde_json::Value;
 
 #[test]
 fn test_pickup_collision_queues_backend_messages() {
@@ -73,6 +74,19 @@ fn test_pickup_collision_queues_backend_messages() {
         queued
     );
 
+    let pickup_json: Value = serde_json::from_str(
+        queued
+            .iter()
+            .find(|msg| msg.contains("\"type\":\"food_pickup\""))
+            .expect("pickup message should be queued"),
+    )
+    .expect("pickup message should be valid json");
+    assert_eq!(
+        pickup_json["payload"]["food_id"].as_u64(),
+        Some(0),
+        "expected food_pickup to use dense numeric slot ids, got {pickup_json:?}"
+    );
+
     let has_children = app
         .world()
         .entity(ant)
@@ -138,5 +152,25 @@ fn test_startup_queues_food_snapshot_after_hello() {
         queued[1].contains("\"x\":30.0") && queued[1].contains("\"y\":40.0"),
         "expected startup food snapshot to include second food position, got {:?}",
         queued
+    );
+
+    let snapshot_json: Value =
+        serde_json::from_str(&queued[1]).expect("snapshot message should be valid json");
+    let foods = snapshot_json["payload"]["foods"]
+        .as_array()
+        .expect("foods array should be present");
+    let mut food_ids: Vec<u64> = foods
+        .iter()
+        .map(|food| {
+            food["food_id"]
+                .as_u64()
+                .expect("expected numeric dense slot ids in startup snapshot")
+        })
+        .collect();
+    food_ids.sort_unstable();
+    assert_eq!(
+        food_ids,
+        vec![0, 1],
+        "expected startup snapshot food ids to be dense numeric slots, got {snapshot_json:?}"
     );
 }
