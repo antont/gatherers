@@ -105,6 +105,60 @@ impl SimHandle {
         self.total_events.fetch_add(1, Ordering::Relaxed);
     }
 
+    fn apply_food_snapshot(
+        &self,
+        payload: &crate::protocol::FoodSnapshotPayload,
+    ) -> Result<isize, String> {
+        let count = payload.foods.len();
+        let mut positions = vec![None; count];
+        for food in &payload.foods {
+            if food.food_id >= count {
+                return Err(format!(
+                    "sim_food_snapshot slot id {} out of range for {} foods",
+                    food.food_id, count
+                ));
+            }
+            if positions[food.food_id].is_some() {
+                return Err(format!(
+                    "sim_food_snapshot duplicated slot id {}",
+                    food.food_id
+                ));
+            }
+            positions[food.food_id] = Some((food.x, food.y));
+        }
+        if positions.iter().any(Option::is_none) {
+            return Err("sim_food_snapshot must provide a dense slot set".into());
+        }
+
+        self.record_event();
+
+        if let Some(existing) = self.foods.get() {
+            if existing.len() != count {
+                return Err(format!(
+                    "sim_food_snapshot shape mismatch: expected {} foods, got {}",
+                    existing.len(), count
+                ));
+            }
+            for (slot, position) in existing.iter().zip(positions.into_iter()) {
+                let (x, y) = position.expect("validated dense slot set");
+                slot.store_present(x, y);
+            }
+        } else {
+            let slots: Box<[AtomicFoodSlot]> = positions
+                .into_iter()
+                .map(|position| {
+                    let (x, y) = position.expect("validated dense slot set");
+                    AtomicFoodSlot::new_present(x, y)
+                })
+                .collect::<Vec<_>>()
+                .into_boxed_slice();
+            let _ = self.foods.set(slots);
+        }
+
+        let prev = self.loose_food_count.swap(count, Ordering::Relaxed);
+        Ok(count as isize - prev as isize)
+    }
+
     /// Apply one event.  Returns the signed change to the loose-food count
     /// so the caller can update the global aggregate.
     ///
@@ -119,18 +173,7 @@ impl SimHandle {
                 0
             }
             EventPayload::SimFoodSnapshot(payload) => {
-                self.record_event();
-                let slots: Box<[AtomicFoodSlot]> = payload
-                    .foods
-                    .iter()
-                    .map(|food| AtomicFoodSlot::new_present(food.x, food.y))
-                    .collect::<Vec<_>>()
-                    .into_boxed_slice();
-                let count = slots.len();
-                // `set` silently no-ops if already installed (fixed-after-init invariant).
-                let _ = self.foods.set(slots);
-                let prev = self.loose_food_count.swap(count, Ordering::Relaxed);
-                count as isize - prev as isize
+                self.apply_food_snapshot(payload)?
             }
             EventPayload::FoodPickup(payload) => {
                 self.record_event();
@@ -172,7 +215,11 @@ impl SimHandle {
                 self.turn_move_count.fetch_add(1, Ordering::Relaxed);
                 0
             }
-            EventPayload::SimHeartbeat(_) | EventPayload::SimGoodbye(_) => {
+            EventPayload::SimHeartbeat(_) => {
+                self.record_event();
+                0
+            }
+            EventPayload::SimGoodbye(_) => {
                 return Err(format!("unsupported event type: {}", envelope.event_type));
             }
         };
@@ -433,12 +480,70 @@ mod atomic_slot_tests {
         )
     }
 
+    fn snapshot_with_foods(sim_id: &str, foods: Vec<StartupFoodPayload>) -> EventEnvelope {
+        make_envelope(
+            sim_id,
+            EventPayload::SimFoodSnapshot(FoodSnapshotPayload { foods }),
+        )
+    }
+
     #[test]
     fn snapshot_installs_slot_array_with_all_slots_present() {
         let handle = SimHandle::new("sim-a".into());
         let outcome = handle.apply_event(&snapshot_3_foods("sim-a")).unwrap();
         assert_eq!(outcome.loose_food_delta, 3);
         assert_eq!(handle.loose_food_count.load(Ordering::Relaxed), 3);
+    }
+
+    #[test]
+    fn repeated_same_shape_snapshot_refreshes_slot_positions() {
+        let handle = SimHandle::new("sim-a".into());
+        handle.apply_event(&snapshot_3_foods("sim-a")).unwrap();
+
+        let outcome = handle
+            .apply_event(&snapshot_with_foods(
+                "sim-a",
+                vec![
+                    StartupFoodPayload { food_id: 0, x: 101.0, y: 201.0 },
+                    StartupFoodPayload { food_id: 1, x: 301.0, y: 401.0 },
+                    StartupFoodPayload { food_id: 2, x: 501.0, y: 601.0 },
+                ],
+            ))
+            .unwrap();
+
+        assert_eq!(outcome.loose_food_delta, 0);
+        assert_eq!(handle.loose_food_count.load(Ordering::Relaxed), 3);
+        let foods = handle.foods.get().expect("slot array should stay installed");
+        assert_eq!(foods[0].load(), Some((101.0, 201.0)));
+        assert_eq!(foods[1].load(), Some((301.0, 401.0)));
+        assert_eq!(foods[2].load(), Some((501.0, 601.0)));
+    }
+
+    #[test]
+    fn repeated_mismatched_shape_snapshot_is_rejected() {
+        let handle = SimHandle::new("sim-a".into());
+        handle.apply_event(&snapshot_3_foods("sim-a")).unwrap();
+
+        let error = match handle.apply_event(&snapshot_with_foods(
+            "sim-a",
+            vec![
+                StartupFoodPayload { food_id: 0, x: 101.0, y: 201.0 },
+                StartupFoodPayload { food_id: 1, x: 301.0, y: 401.0 },
+            ],
+        )) {
+            Ok(_) => panic!("mismatched snapshot shape should be rejected"),
+            Err(error) => error,
+        };
+
+        assert!(
+            error.contains("sim_food_snapshot"),
+            "expected snapshot shape error, got {error}"
+        );
+        assert_eq!(handle.loose_food_count.load(Ordering::Relaxed), 3);
+        let foods = handle.foods.get().expect("original slot array should remain installed");
+        assert_eq!(foods[0].load(), Some((10.0, 20.0)));
+        assert_eq!(foods[1].load(), Some((30.0, 40.0)));
+        assert_eq!(foods[2].load(), Some((50.0, 60.0)));
     }
 
     #[test]

@@ -137,6 +137,12 @@ impl AppState {
         handle: &Arc<SimHandle>,
         envelope: EventEnvelope,
     ) -> Result<(), String> {
+        if handle.sim_id != envelope.sim_id {
+            return Err(format!(
+                "sim_id mismatch for cached handle: expected {}, got {}",
+                handle.sim_id, envelope.sim_id
+            ));
+        }
         let analytics_affected = event_affects_analytics(&envelope);
         let outcome = handle.apply_event(&envelope)?;
         self.apply_live_event(&envelope, &outcome);
@@ -863,6 +869,30 @@ mod tests {
             after, before,
             "live event path should not iterate all sim handles just to publish immediate live state"
         );
+    }
+
+    #[test]
+    fn apply_event_with_handle_rejects_sim_id_mismatch() {
+        let state = AppState::new();
+        let handle = state.inner.registry.get_or_create("sim-a");
+
+        state
+            .apply_event_with_handle(&handle, sim_hello_envelope("sim-a"))
+            .expect("initial sim-a event should be accepted");
+
+        let error = state
+            .apply_event_with_handle(&handle, sim_hello_envelope("sim-b"))
+            .expect_err("cached handle should reject later events for a different sim_id");
+
+        assert!(
+            error.contains("sim_id"),
+            "expected sim_id mismatch error, got {error}"
+        );
+
+        let snapshot = current_snapshot_json(&state);
+        let sims = snapshot["sims"].as_array().expect("sims array");
+        assert_eq!(sims.len(), 1);
+        assert_eq!(sims[0]["sim_id"], "sim-a");
     }
 
     // ---- analytics scheduling tests ----

@@ -5,7 +5,7 @@ use gatherers_backend_rust::{
     app::{AppState, build_router_with_state},
     protocol::{
         EventEnvelope, EventPayload, FoodDropPayload, FoodPickupPayload,
-        FoodSnapshotPayload, HelloPayload, StartupFoodPayload,
+        FoodSnapshotPayload, HeartbeatPayload, HelloPayload, StartupFoodPayload,
     },
 };
 use serde_json::Value;
@@ -260,6 +260,81 @@ async fn dashboard_websocket_removes_sim_after_ingest_socket_closes() {
     .expect("dashboard should observe sim removal after ingest socket closes");
 
     assert_eq!(disconnected["summary"]["live_summary"]["connected_sim_count"], 0);
+}
+
+#[tokio::test]
+async fn ingest_websocket_accepts_heartbeat_without_disconnect() {
+    let state = AppState::new();
+    let base_url = spawn_test_server(state.clone()).await;
+
+    let (mut dashboard_ws, _) = connect_async(format!("{base_url}/ws/dashboard"))
+        .await
+        .expect("dashboard websocket should connect");
+    let _initial = read_json_message(&mut dashboard_ws).await;
+
+    let (mut ingest_ws, _) = connect_async(format!("{base_url}/ws/ingest"))
+        .await
+        .expect("ingest websocket should connect");
+
+    for envelope in [
+        EventEnvelope {
+            event_type: "sim_hello".into(),
+            sim_id: "sim-heartbeat".into(),
+            seq: 1,
+            timestamp_ms: 0,
+            payload: EventPayload::SimHello(HelloPayload {
+                sim_name: "sim-heartbeat".into(),
+                source: "rust-bevy".into(),
+                session_started_ms: 0,
+                world_width: 1280.0,
+                world_height: 720.0,
+                ant_count: 26,
+                food_count: 1,
+            }),
+        },
+        EventEnvelope {
+            event_type: "sim_heartbeat".into(),
+            sim_id: "sim-heartbeat".into(),
+            seq: 2,
+            timestamp_ms: 0,
+            payload: EventPayload::SimHeartbeat(HeartbeatPayload {
+                connected_ant_count: 26,
+                known_food_count: 1,
+                dropped_outbound_events: 0,
+            }),
+        },
+        EventEnvelope {
+            event_type: "sim_food_snapshot".into(),
+            sim_id: "sim-heartbeat".into(),
+            seq: 3,
+            timestamp_ms: 0,
+            payload: EventPayload::SimFoodSnapshot(FoodSnapshotPayload {
+                foods: vec![StartupFoodPayload { food_id: 0, x: 25.0, y: 35.0 }],
+            }),
+        },
+    ] {
+        ingest_ws
+            .send(Message::Text(
+                serde_json::to_string(&envelope).expect("event json").into(),
+            ))
+            .await
+            .expect("event send");
+    }
+
+    let update = tokio::time::timeout(
+        std::time::Duration::from_millis(750),
+        wait_for_json_message(&mut dashboard_ws, |json| {
+            json["summary"]["live_summary"]["connected_sim_count"] == 1
+                && json["summary"]["live_summary"]["loose_food_count"] == 1
+                && json["sims"][0]["sim_id"] == "sim-heartbeat"
+                && json["sims"][0]["loose_food_count"] == 1
+        }),
+    )
+    .await
+    .expect("heartbeat should not disconnect ingest websocket before later snapshot");
+
+    assert_eq!(update["summary"]["live_summary"]["connected_sim_count"], 1);
+    assert_eq!(update["summary"]["live_summary"]["loose_food_count"], 1);
 }
 
 async fn spawn_test_server(state: AppState) -> String {
