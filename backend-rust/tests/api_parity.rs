@@ -137,17 +137,17 @@ async fn api_summary_exposes_live_counts_immediately_and_analytics_catch_up_afte
         payload: EventPayload::SimFoodSnapshot(FoodSnapshotPayload {
             foods: vec![
                 StartupFoodPayload {
-                    food_id: "0".into(),
+                    food_id: 0,
                     x: 10.0,
                     y: 20.0,
                 },
                 StartupFoodPayload {
-                    food_id: "1".into(),
+                    food_id: 1,
                     x: 30.0,
                     y: 40.0,
                 },
                 StartupFoodPayload {
-                    food_id: "2".into(),
+                    food_id: 2,
                     x: 50.0,
                     y: 60.0,
                 },
@@ -215,8 +215,8 @@ async fn api_summary_keeps_live_counts_fresh_even_when_analytics_are_stale() {
         timestamp_ms: 0,
         payload: EventPayload::SimFoodSnapshot(FoodSnapshotPayload {
             foods: vec![
-                StartupFoodPayload { food_id: "0".into(), x: 12.0, y: 18.0 },
-                StartupFoodPayload { food_id: "1".into(), x: 22.0, y: 28.0 },
+                StartupFoodPayload { food_id: 0, x: 12.0, y: 18.0 },
+                StartupFoodPayload { food_id: 1, x: 22.0, y: 28.0 },
             ],
         }),
     })
@@ -228,7 +228,7 @@ async fn api_summary_keeps_live_counts_fresh_even_when_analytics_are_stale() {
         timestamp_ms: 0,
         payload: EventPayload::FoodPickup(FoodPickupPayload {
             ant_id: Some("ant-1".into()),
-            food_id: "0".into(),
+            food_id: 0,
             x: None, y: None, direction_x: None, direction_y: None, frame: None,
         }),
     })
@@ -240,7 +240,7 @@ async fn api_summary_keeps_live_counts_fresh_even_when_analytics_are_stale() {
         timestamp_ms: 0,
         payload: EventPayload::FoodPickup(FoodPickupPayload {
             ant_id: Some("ant-1".into()),
-            food_id: "1".into(),
+            food_id: 1,
             x: None, y: None, direction_x: None, direction_y: None, frame: None,
         }),
     })
@@ -252,7 +252,7 @@ async fn api_summary_keeps_live_counts_fresh_even_when_analytics_are_stale() {
         timestamp_ms: 0,
         payload: EventPayload::FoodDrop(FoodDropPayload {
             ant_id: Some("ant-1".into()),
-            food_id: "0".into(),
+            food_id: 0,
             x: 12.0,
             y: 18.0,
             direction_x: Some(0.0),
@@ -279,7 +279,7 @@ async fn api_summary_keeps_live_counts_fresh_even_when_analytics_are_stale() {
         timestamp_ms: 0,
         payload: EventPayload::FoodDrop(FoodDropPayload {
             ant_id: Some("ant-1".into()),
-            food_id: "1".into(),
+            food_id: 1,
             x: 22.0,
             y: 28.0,
             direction_x: Some(0.0),
@@ -335,9 +335,9 @@ async fn api_sims_catches_up_to_direct_ingest_counts() {
         timestamp_ms: 0,
         payload: EventPayload::SimFoodSnapshot(FoodSnapshotPayload {
             foods: vec![
-                StartupFoodPayload { food_id: "0".into(), x: 10.0, y: 20.0 },
-                StartupFoodPayload { food_id: "1".into(), x: 30.0, y: 40.0 },
-                StartupFoodPayload { food_id: "2".into(), x: 50.0, y: 60.0 },
+                StartupFoodPayload { food_id: 0, x: 10.0, y: 20.0 },
+                StartupFoodPayload { food_id: 1, x: 30.0, y: 40.0 },
+                StartupFoodPayload { food_id: 2, x: 50.0, y: 60.0 },
             ],
         }),
     })
@@ -349,7 +349,7 @@ async fn api_sims_catches_up_to_direct_ingest_counts() {
         timestamp_ms: 0,
         payload: EventPayload::FoodPickup(FoodPickupPayload {
             ant_id: Some("ant-1".into()),
-            food_id: "0".into(),
+            food_id: 0,
             x: Some(10.0),
             y: Some(20.0),
             direction_x: Some(1.0),
@@ -365,7 +365,7 @@ async fn api_sims_catches_up_to_direct_ingest_counts() {
         timestamp_ms: 0,
         payload: EventPayload::FoodDrop(FoodDropPayload {
             ant_id: Some("ant-1".into()),
-            food_id: "0".into(),
+            food_id: 0,
             x: 70.0,
             y: 80.0,
             direction_x: Some(0.0),

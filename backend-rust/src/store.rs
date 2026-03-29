@@ -31,10 +31,6 @@ impl FoodSlot {
 
 }
 
-fn parse_slot_index(food_id: &str) -> Option<usize> {
-    food_id.parse::<usize>().ok()
-}
-
 #[derive(Clone, Debug, Default)]
 struct SimState {
     foods: Vec<FoodSlot>,
@@ -139,8 +135,7 @@ impl Store {
         self.with_sim_state_mut(sim_id, |state| {
             state.record_event();
             state.pickup_count += 1;
-            if let Some(idx) = parse_slot_index(&payload.food_id)
-                && let Some(slot) = state.foods.get_mut(idx)
+            if let Some(slot) = state.foods.get_mut(payload.food_id)
                 && slot.present
             {
                 slot.present = false;
@@ -154,9 +149,7 @@ impl Store {
         self.with_sim_state_mut(sim_id, |state| {
             state.record_event();
             state.drop_count += 1;
-            if let Some(idx) = parse_slot_index(&payload.food_id)
-                && let Some(slot) = state.foods.get_mut(idx)
-            {
+            if let Some(slot) = state.foods.get_mut(payload.food_id) {
                 if !slot.present {
                     state.loose_food_count += 1;
                 }
@@ -381,9 +374,9 @@ mod food_slot_tests {
             sim_id,
             EventPayload::SimFoodSnapshot(FoodSnapshotPayload {
                 foods: vec![
-                    StartupFoodPayload { food_id: "0".into(), x: 10.0, y: 20.0 },
-                    StartupFoodPayload { food_id: "1".into(), x: 30.0, y: 40.0 },
-                    StartupFoodPayload { food_id: "2".into(), x: 50.0, y: 60.0 },
+                    StartupFoodPayload { food_id: 0, x: 10.0, y: 20.0 },
+                    StartupFoodPayload { food_id: 1, x: 30.0, y: 40.0 },
+                    StartupFoodPayload { food_id: 2, x: 50.0, y: 60.0 },
                 ],
             }),
         )
@@ -409,7 +402,7 @@ mod food_slot_tests {
                 "sim-a",
                 EventPayload::FoodPickup(FoodPickupPayload {
                     ant_id: None,
-                    food_id: "1".into(),
+                    food_id: 1,
                     x: None,
                     y: None,
                     direction_x: None,
@@ -434,7 +427,7 @@ mod food_slot_tests {
                 "sim-a",
                 EventPayload::FoodPickup(FoodPickupPayload {
                     ant_id: None,
-                    food_id: "0".into(),
+                    food_id: 0,
                     x: None,
                     y: None,
                     direction_x: None,
@@ -449,7 +442,7 @@ mod food_slot_tests {
                 "sim-a",
                 EventPayload::FoodDrop(FoodDropPayload {
                     ant_id: None,
-                    food_id: "0".into(),
+                    food_id: 0,
                     x: 99.0,
                     y: 88.0,
                     direction_x: None,
@@ -465,7 +458,7 @@ mod food_slot_tests {
                 "sim-a",
                 EventPayload::FoodDrop(FoodDropPayload {
                     ant_id: None,
-                    food_id: "0".into(),
+                    food_id: 0,
                     x: 77.0,
                     y: 66.0,
                     direction_x: None,
@@ -490,7 +483,7 @@ mod food_slot_tests {
                 "sim-a",
                 EventPayload::FoodDrop(FoodDropPayload {
                     ant_id: None,
-                    food_id: "999".into(),
+                    food_id: 999,
                     x: 1.0,
                     y: 2.0,
                     direction_x: None,
@@ -506,7 +499,7 @@ mod food_slot_tests {
     }
 
     #[test]
-    fn malformed_slot_id_does_not_change_count() {
+    fn far_out_of_range_slot_id_does_not_change_count() {
         let store = Store::default();
         store.apply_event(&snapshot_3_foods("sim-a")).unwrap();
 
@@ -515,7 +508,7 @@ mod food_slot_tests {
                 "sim-a",
                 EventPayload::FoodPickup(FoodPickupPayload {
                     ant_id: None,
-                    food_id: "not-a-number".into(),
+                    food_id: usize::MAX,
                     x: None,
                     y: None,
                     direction_x: None,
@@ -526,7 +519,7 @@ mod food_slot_tests {
             .unwrap();
         assert_eq!(
             outcome.sim_loose_food_count, 3,
-            "malformed food_id must not change count"
+            "far out-of-range food_id must not change count"
         );
     }
 
@@ -540,7 +533,7 @@ mod food_slot_tests {
                 "sim-a",
                 EventPayload::FoodPickup(FoodPickupPayload {
                     ant_id: None,
-                    food_id: "1".into(),
+                    food_id: 1,
                     x: None,
                     y: None,
                     direction_x: None,
@@ -576,7 +569,7 @@ mod food_slot_tests {
                 "sim-a",
                 EventPayload::FoodPickup(FoodPickupPayload {
                     ant_id: None,
-                    food_id: "0".into(),
+                    food_id: 0,
                     x: None,
                     y: None,
                     direction_x: None,
@@ -591,7 +584,7 @@ mod food_slot_tests {
                 "sim-a",
                 EventPayload::FoodDrop(FoodDropPayload {
                     ant_id: None,
-                    food_id: "0".into(),
+                    food_id: 0,
                     x: 99.0,
                     y: 88.0,
                     direction_x: None,

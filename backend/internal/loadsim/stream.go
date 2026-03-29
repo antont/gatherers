@@ -50,7 +50,7 @@ type ClientEventStream struct {
 	x           float64
 	y           float64
 	step        int
-	foodIDs     []string
+	foodIDs     []int
 	foodIndex   int
 	antIDs      []string
 	antIndex    int
@@ -302,7 +302,7 @@ func runClient(ctx context.Context, opts RunOptions, index int) error {
 	}
 }
 
-func (s *ClientEventStream) currentFoodID() string {
+func (s *ClientEventStream) currentFoodID() int {
 	return s.foodIDs[s.foodIndex%len(s.foodIDs)]
 }
 
@@ -322,15 +322,15 @@ func buildAntIDs(base string, count int) []string {
 	return ids
 }
 
-func buildFoodIDs(_ string, count int) []string {
-	ids := make([]string, 0, count)
+func buildFoodIDs(_ string, count int) []int {
+	ids := make([]int, 0, count)
 	for i := 0; i < count; i++ {
-		ids = append(ids, fmt.Sprintf("%d", i))
+		ids = append(ids, i)
 	}
 	return ids
 }
 
-func buildStartupFoods(foodIDs []string, startX, startY float64) []map[string]any {
+func buildStartupFoods(foodIDs []int, startX, startY float64) []map[string]any {
 	foods := make([]map[string]any, 0, len(foodIDs))
 	for i, foodID := range foodIDs {
 		cluster := i % 5

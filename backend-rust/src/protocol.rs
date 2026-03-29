@@ -45,7 +45,7 @@ pub struct FoodSnapshotPayload {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct StartupFoodPayload {
-    pub food_id: String,
+    pub food_id: usize,
     pub x: f32,
     pub y: f32,
 }
@@ -61,7 +61,7 @@ pub struct HeartbeatPayload {
 pub struct FoodPickupPayload {
     #[serde(default)]
     pub ant_id: Option<String>,
-    pub food_id: String,
+    pub food_id: usize,
     #[serde(default)]
     pub x: Option<f32>,
     #[serde(default)]
@@ -78,7 +78,7 @@ pub struct FoodPickupPayload {
 pub struct FoodDropPayload {
     #[serde(default)]
     pub ant_id: Option<String>,
-    pub food_id: String,
+    pub food_id: usize,
     pub x: f32,
     pub y: f32,
     #[serde(default)]

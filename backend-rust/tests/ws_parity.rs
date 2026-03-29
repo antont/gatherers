@@ -52,7 +52,7 @@ async fn dashboard_websocket_receives_update_after_ingest_websocket_events() {
             seq: 2,
             timestamp_ms: 0,
             payload: EventPayload::SimFoodSnapshot(FoodSnapshotPayload {
-                foods: vec![StartupFoodPayload { food_id: "0".into(), x: 25.0, y: 25.0 }],
+                foods: vec![StartupFoodPayload { food_id: 0, x: 25.0, y: 25.0 }],
             }),
         },
         EventEnvelope {
@@ -62,7 +62,7 @@ async fn dashboard_websocket_receives_update_after_ingest_websocket_events() {
             timestamp_ms: 0,
             payload: EventPayload::FoodPickup(FoodPickupPayload {
                 ant_id: Some("ant-1".into()),
-                food_id: "0".into(),
+                food_id: 0,
                 x: None, y: None, direction_x: None, direction_y: None, frame: None,
             }),
         },
@@ -73,7 +73,7 @@ async fn dashboard_websocket_receives_update_after_ingest_websocket_events() {
             timestamp_ms: 0,
             payload: EventPayload::FoodDrop(FoodDropPayload {
                 ant_id: Some("ant-1".into()),
-                food_id: "0".into(),
+                food_id: 0,
                 x: 25.0,
                 y: 25.0,
                 direction_x: Some(0.0),
@@ -132,7 +132,7 @@ async fn dashboard_websocket_exposes_live_counts_immediately_then_analytics_catc
         seq: 2,
         timestamp_ms: 0,
         payload: EventPayload::SimFoodSnapshot(FoodSnapshotPayload {
-            foods: vec![StartupFoodPayload { food_id: "0".into(), x: 12.0, y: 18.0 }],
+            foods: vec![StartupFoodPayload { food_id: 0, x: 12.0, y: 18.0 }],
         }),
     })
     .expect("sim_food_snapshot should be accepted");

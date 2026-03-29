@@ -537,7 +537,7 @@ mod tests {
                 payload: EventPayload::SimFoodSnapshot(FoodSnapshotPayload {
                     foods: (0..5000)
                         .map(|index| StartupFoodPayload {
-                            food_id: format!("{index}"),
+                            food_id: index,
                             x: ((index * 17) % 4000) as f32,
                             y: ((index * 19) % 4000) as f32,
                         })
@@ -738,7 +738,7 @@ mod tests {
                         payload: EventPayload::SimFoodSnapshot(FoodSnapshotPayload {
                             foods: (0..5000)
                                 .map(|index| StartupFoodPayload {
-                                    food_id: format!("{index}"),
+                                    food_id: index,
                                     x: ((index * 17) % 4000) as f32,
                                     y: ((index * 19) % 4000) as f32,
                                 })
@@ -779,7 +779,7 @@ mod tests {
             payload: EventPayload::SimFoodSnapshot(FoodSnapshotPayload {
                 foods: (0..count)
                     .map(|i| StartupFoodPayload {
-                        food_id: format!("{i}"),
+                        food_id: i,
                         x: (i * 10) as f32,
                         y: (i * 10) as f32,
                     })
@@ -796,7 +796,7 @@ mod tests {
             timestamp_ms: 0,
             payload: EventPayload::FoodPickup(crate::protocol::FoodPickupPayload {
                 ant_id: Some("ant-1".into()),
-                food_id: format!("{slot}"),
+                food_id: slot,
                 x: None,
                 y: None,
                 direction_x: None,
@@ -820,7 +820,7 @@ mod tests {
             timestamp_ms: 0,
             payload: EventPayload::FoodDrop(crate::protocol::FoodDropPayload {
                 ant_id: Some("ant-1".into()),
-                food_id: format!("{slot}"),
+                food_id: slot,
                 x,
                 y,
                 direction_x: Some(0.0),
@@ -1065,7 +1065,7 @@ mod tests {
                 timestamp_ms: 0,
                 payload: EventPayload::FoodPickup(crate::protocol::FoodPickupPayload {
                     ant_id: Some("ant-1".into()),
-                    food_id: "food-nonexistent".into(),
+                    food_id: usize::MAX,
                     x: Some(50.0),
                     y: Some(50.0),
                     direction_x: Some(1.0),

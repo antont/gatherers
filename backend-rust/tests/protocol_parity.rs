@@ -53,8 +53,8 @@ fn deserializes_sim_food_snapshot_from_current_client_shape() {
             "timestamp_ms": 0,
             "payload": {
                 "foods": [
-                    { "food_id": "food-1", "x": 10.5, "y": 20.5 },
-                    { "food_id": "food-2", "x": 30.5, "y": 40.5 }
+                    { "food_id": 0, "x": 10.5, "y": 20.5 },
+                    { "food_id": 1, "x": 30.5, "y": 40.5 }
                 ]
             }
         }"#,
@@ -67,12 +67,12 @@ fn deserializes_sim_food_snapshot_from_current_client_shape() {
                 foods,
                 vec![
                     StartupFoodPayload {
-                        food_id: "food-1".into(),
+                        food_id: 0,
                         x: 10.5,
                         y: 20.5,
                     },
                     StartupFoodPayload {
-                        food_id: "food-2".into(),
+                        food_id: 1,
                         x: 30.5,
                         y: 40.5,
                     },
@@ -93,7 +93,7 @@ fn deserializes_food_pickup_and_drop_from_current_client_shape() {
             "timestamp_ms": 0,
             "payload": {
                 "ant_id": "ant-1",
-                "food_id": "food-1",
+                "food_id": 0,
                 "x": 1.0,
                 "y": 2.0,
                 "direction_x": -0.5,
@@ -109,7 +109,7 @@ fn deserializes_food_pickup_and_drop_from_current_client_shape() {
             ant_id, food_id, ..
         }) => {
             assert_eq!(ant_id.as_deref(), Some("ant-1"));
-            assert_eq!(food_id, "food-1");
+            assert_eq!(food_id, 0);
         }
         other => panic!("expected food_pickup payload, got {other:?}"),
     }
@@ -122,7 +122,7 @@ fn deserializes_food_pickup_and_drop_from_current_client_shape() {
             "timestamp_ms": 0,
             "payload": {
                 "ant_id": "ant-1",
-                "food_id": "food-1",
+                "food_id": 0,
                 "x": 3.0,
                 "y": 4.0,
                 "direction_x": 0.25,
@@ -138,7 +138,7 @@ fn deserializes_food_pickup_and_drop_from_current_client_shape() {
             ant_id, food_id, ..
         }) => {
             assert_eq!(ant_id.as_deref(), Some("ant-1"));
-            assert_eq!(food_id, "food-1");
+            assert_eq!(food_id, 0);
         }
         other => panic!("expected food_drop payload, got {other:?}"),
     }

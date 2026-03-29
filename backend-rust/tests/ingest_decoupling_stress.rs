@@ -91,7 +91,7 @@ fn client_events(sim_id: &str, index: usize) -> Vec<EventEnvelope> {
         payload: EventPayload::SimFoodSnapshot(FoodSnapshotPayload {
             foods: (0..INITIAL_FOOD_COUNT)
                 .map(|food_index| StartupFoodPayload {
-                    food_id: format!("{food_index}"),
+                    food_id: food_index,
                     x: ((index * 17 + food_index * 13) % 2000) as f32,
                     y: ((index * 19 + food_index * 11) % 2000) as f32,
                 })
@@ -101,7 +101,6 @@ fn client_events(sim_id: &str, index: usize) -> Vec<EventEnvelope> {
 
     let mut seq = 3;
     for triplet in 0..ACTIVITY_TRIPLETS {
-        let food_id = format!("{triplet}");
         let ant_id = format!("{sim_id}-ant-{triplet:03}");
         let x = (index * 31 + triplet * 7) as f32;
         let y = (index * 29 + triplet * 5) as f32;
@@ -113,7 +112,7 @@ fn client_events(sim_id: &str, index: usize) -> Vec<EventEnvelope> {
             timestamp_ms: 0,
             payload: EventPayload::FoodPickup(FoodPickupPayload {
                 ant_id: Some(ant_id.clone()),
-                food_id: food_id.clone(),
+                food_id: triplet,
                 x: Some(x),
                 y: Some(y),
                 direction_x: Some(1.0),
@@ -130,7 +129,7 @@ fn client_events(sim_id: &str, index: usize) -> Vec<EventEnvelope> {
             timestamp_ms: 0,
             payload: EventPayload::FoodDrop(FoodDropPayload {
                 ant_id: Some(ant_id.clone()),
-                food_id: food_id.clone(),
+                food_id: triplet,
                 x: x + 0.5,
                 y: y + 0.5,
                 direction_x: Some(0.0),
