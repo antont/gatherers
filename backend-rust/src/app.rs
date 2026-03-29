@@ -1,6 +1,6 @@
 use std::sync::{
-    Arc, Once, RwLock,
-    atomic::{AtomicBool, Ordering},
+    Arc, Once, OnceLock, RwLock,
+    atomic::{AtomicBool, AtomicUsize, Ordering},
 };
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -19,11 +19,10 @@ use tokio::sync::{Mutex, Notify, broadcast};
 
 use crate::{
     dashboard::render_dashboard,
-    ingest::handle_ingest_event,
     protocol::{EventEnvelope, EventPayload},
-    store::{EventOutcome, Store},
+    store::{Registry, SimHandle},
     summary::{
-        AnalyticsMetaResponse, CachedAnalyticsSnapshot, CachedLiveSnapshot, CachedSnapshot,
+        AnalyticsMetaResponse, CachedAnalyticsSnapshot, CachedSnapshot, LiveSummaryResponse,
         SimSummaryResponse, SummaryResponse,
     },
 };
@@ -34,8 +33,11 @@ pub struct AppState {
 }
 
 struct AppStateInner {
-    store: Store,
-    live_snapshot: RwLock<LiveCacheState>,
+    registry: Registry,
+    /// Monotonically increasing count of all processed events.
+    global_total_events: AtomicUsize,
+    /// Set once on the first event; used to compute events/sec and elapsed.
+    started_at: OnceLock<Instant>,
     analytics_snapshot: RwLock<CachedAnalyticsSnapshot>,
     refresh: Mutex<RefreshState>,
     analytics_dirty: AtomicBool,
@@ -51,13 +53,6 @@ struct RefreshState {
     dashboard_watchers: usize,
     last_api_demand_at: Option<Instant>,
     next_eligible_at: Option<Instant>,
-}
-
-#[derive(Clone, Debug, Default)]
-struct LiveCacheState {
-    snapshot: CachedLiveSnapshot,
-    started_at: Option<Instant>,
-    total_events: usize,
 }
 
 #[derive(Clone, Copy)]
@@ -79,6 +74,12 @@ impl Default for RefreshTuning {
     }
 }
 
+impl Default for AppState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AppState {
     pub fn new() -> Self {
         Self::new_with_tuning(RefreshTuning::default())
@@ -88,8 +89,9 @@ impl AppState {
         let (dashboard_tx, _) = broadcast::channel(32);
         Self {
             inner: Arc::new(AppStateInner {
-                store: Store::default(),
-                live_snapshot: RwLock::new(LiveCacheState::default()),
+                registry: Registry::default(),
+                global_total_events: AtomicUsize::new(0),
+                started_at: OnceLock::new(),
                 analytics_snapshot: RwLock::new(CachedAnalyticsSnapshot::default()),
                 refresh: Mutex::new(RefreshState {
                     dashboard_watchers: 0,
@@ -107,28 +109,58 @@ impl AppState {
         }
     }
 
+    /// Convenience entry point used by tests and `AppState::apply_event`.
+    /// Hot-path ingest bypasses the registry lookup via `apply_event_with_handle`.
     pub fn apply_event(&self, envelope: EventEnvelope) -> Result<(), String> {
+        let handle = self.inner.registry.get_or_create(&envelope.sim_id);
+        self.apply_event_with_handle(&handle, envelope)
+    }
+
+    /// Apply an event using a pre-cached sim handle.  No registry access.
+    pub(crate) fn apply_event_with_handle(
+        &self,
+        handle: &Arc<SimHandle>,
+        envelope: EventEnvelope,
+    ) -> Result<(), String> {
         let analytics_affected = event_affects_analytics(&envelope);
-        let outcome = self.inner.store.apply_event(&envelope)?;
-        self.apply_live_event(&envelope, &outcome);
+        let outcome = handle.apply_event(&envelope)?;
+
+        self.inner.global_total_events.fetch_add(1, Ordering::Relaxed);
+        self.inner.started_at.get_or_init(Instant::now);
+
         let _ = self.inner.dashboard_tx.send(self.current_snapshot());
+
         if analytics_affected {
             self.mark_analytics_stale();
             self.inner.analytics_dirty.store(true, Ordering::SeqCst);
             self.ensure_worker();
             self.signal_refresh();
         }
+
+        let _ = outcome; // loose_food_delta drives per-sim atomic; global derived on read
         Ok(())
     }
 
-    fn current_snapshot(&self) -> CachedSnapshot {
-        let live_snapshot = self
+    /// Build a full snapshot by reading all sim handles and global atomics.
+    /// No live-cache lock -- live counters come directly from handle atomics.
+    pub fn current_snapshot(&self) -> CachedSnapshot {
+        let handles = self.inner.registry.all_handles();
+        let sims: Vec<SimSummaryResponse> =
+            handles.iter().map(|h| h.sim_summary()).collect();
+        let loose_food_count: usize = sims.iter().map(|s| s.loose_food_count).sum();
+        let total_events = self.inner.global_total_events.load(Ordering::Relaxed);
+        let elapsed_seconds = self
             .inner
-            .live_snapshot
-            .read()
-            .expect("live snapshot lock poisoned")
-            .snapshot
-            .clone();
+            .started_at
+            .get()
+            .map(|t| t.elapsed().as_secs_f64())
+            .unwrap_or(0.0);
+        let events_per_second = if elapsed_seconds > 0.0 {
+            total_events as f64 / elapsed_seconds
+        } else {
+            0.0
+        };
+
         let mut analytics_snapshot = self
             .inner
             .analytics_snapshot
@@ -140,11 +172,16 @@ impl AppState {
 
         CachedSnapshot {
             summary: SummaryResponse {
-                live_summary: live_snapshot.live_summary,
+                live_summary: LiveSummaryResponse {
+                    connected_sim_count: sims.len(),
+                    loose_food_count,
+                    elapsed_seconds,
+                    events_per_second,
+                },
                 analytics_summary: analytics_snapshot.analytics_summary,
                 analytics_meta: analytics_snapshot.analytics_meta,
             },
-            sims: live_snapshot.sims,
+            sims,
         }
     }
 
@@ -189,50 +226,6 @@ impl AppState {
         self.inner.refresh_signal.notify_one();
     }
 
-    fn apply_live_event(&self, envelope: &EventEnvelope, outcome: &EventOutcome) {
-        let mut live_cache = self
-            .inner
-            .live_snapshot
-            .write()
-            .expect("live snapshot lock poisoned");
-
-        let sim = live_cache.sim_summary_mut(&envelope.sim_id);
-        let previous_loose_food = sim.loose_food_count;
-
-        match &envelope.payload {
-            EventPayload::SimHello(payload) => {
-                sim.ant_count = payload.ant_count;
-            }
-            EventPayload::SimFoodSnapshot(_) => {}
-            EventPayload::FoodPickup(_) => {
-                sim.pickup_count += 1;
-            }
-            EventPayload::FoodDrop(_) => {
-                sim.drop_count += 1;
-            }
-            EventPayload::AntTurnMove(_) => {
-                sim.turn_move_count += 1;
-            }
-            EventPayload::SimHeartbeat(_) | EventPayload::SimGoodbye(_) => {}
-        }
-        sim.loose_food_count = outcome.sim_loose_food_count;
-        let loose_food_delta = sim.loose_food_count as isize - previous_loose_food as isize;
-
-        live_cache.total_events += 1;
-        if live_cache.started_at.is_none() {
-            live_cache.started_at = Some(Instant::now());
-        }
-        live_cache.snapshot.live_summary.connected_sim_count = live_cache.snapshot.sims.len();
-        live_cache.snapshot.live_summary.loose_food_count = live_cache
-            .snapshot
-            .live_summary
-            .loose_food_count
-            .saturating_add_signed(loose_food_delta);
-        let (elapsed_seconds, events_per_second) = live_cache.metrics();
-        live_cache.snapshot.live_summary.elapsed_seconds = elapsed_seconds;
-        live_cache.snapshot.live_summary.events_per_second = events_per_second;
-    }
-
     fn mark_analytics_stale(&self) {
         let mut analytics_snapshot = self
             .inner
@@ -267,20 +260,24 @@ impl AppState {
                     continue;
                 }
 
+                // Gather analytics input: briefly clone handles, then scan
+                // their atomic food slots with no lock held.
                 let copy_started = Instant::now();
-                let analytics_input = self.inner.store.analytics_input_data();
+                let analytics_input = self.inner.registry.analytics_input_data();
                 self.inner
                     .last_snapshot_copy_micros
                     .store(copy_started.elapsed().as_micros() as u64, Ordering::SeqCst);
+
                 let compute_started = Instant::now();
                 let analytics_summary =
                     tokio::task::spawn_blocking(move || analytics_input.summary())
-                    .await
-                    .expect("analytics compute task should join");
+                        .await
+                        .expect("analytics compute task should join");
                 let compute_duration = compute_started.elapsed();
                 self.inner
                     .last_snapshot_compute_micros
                     .store(compute_duration.as_micros() as u64, Ordering::SeqCst);
+
                 {
                     let stale_again = self.inner.analytics_dirty.load(Ordering::SeqCst);
                     let mut analytics_guard = self
@@ -338,30 +335,6 @@ impl AppState {
             interval = self.inner.tuning.max_refresh_interval;
         }
         interval
-    }
-}
-
-impl LiveCacheState {
-    fn sim_summary_mut(&mut self, sim_id: &str) -> &mut SimSummaryResponse {
-        if let Some(index) = self.snapshot.sims.iter().position(|sim| sim.sim_id == sim_id) {
-            return &mut self.snapshot.sims[index];
-        }
-        self.snapshot.sims.push(SimSummaryResponse {
-            sim_id: sim_id.to_string(),
-            ..SimSummaryResponse::default()
-        });
-        self.snapshot.sims.last_mut().expect("new sim summary")
-    }
-
-    fn metrics(&self) -> (f64, f64) {
-        let Some(started_at) = self.started_at else {
-            return (0.0, 0.0);
-        };
-        let elapsed_seconds = started_at.elapsed().as_secs_f64();
-        if elapsed_seconds <= 0.0 {
-            return (0.0, 0.0);
-        }
-        (elapsed_seconds, self.total_events as f64 / elapsed_seconds)
     }
 }
 
@@ -440,7 +413,12 @@ async fn dashboard_ws(ws: WebSocketUpgrade, State(state): State<AppState>) -> im
     ws.on_upgrade(move |socket| handle_dashboard_socket(state, socket))
 }
 
+/// Ingest WebSocket handler.
+/// The sim handle is looked up once from the registry (on first event) and
+/// cached for the lifetime of the connection.  All subsequent events bypass
+/// the registry entirely.
 async fn handle_ingest_socket(state: AppState, mut socket: WebSocket) {
+    let mut cached_handle: Option<Arc<SimHandle>> = None;
     while let Some(message_result) = socket.next().await {
         let Ok(message) = message_result else {
             return;
@@ -451,7 +429,9 @@ async fn handle_ingest_socket(state: AppState, mut socket: WebSocket) {
         let Ok(event) = serde_json::from_str::<EventEnvelope>(&text) else {
             continue;
         };
-        if handle_ingest_event(&state, event).await.is_err() {
+        let handle = cached_handle
+            .get_or_insert_with(|| state.inner.registry.get_or_create(&event.sim_id));
+        if state.apply_event_with_handle(handle, event).is_err() {
             return;
         }
     }
@@ -497,7 +477,8 @@ async fn handle_dashboard_socket(state: AppState, mut socket: WebSocket) {
 #[cfg(test)]
 mod tests {
     use std::{
-        sync::{Arc, atomic::Ordering},
+        sync::Arc,
+        sync::atomic::Ordering,
         time::{Duration, Instant},
     };
 
@@ -508,266 +489,24 @@ mod tests {
         EventEnvelope, EventPayload, FoodSnapshotPayload, HelloPayload, StartupFoodPayload,
     };
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn refresh_does_not_hold_store_lock_long_enough_to_starve_writes() {
-        let state = AppState::new();
-        state
-            .apply_event(EventEnvelope {
-                event_type: "sim_hello".into(),
-                sim_id: "sim-lock".into(),
-                seq: 1,
-                timestamp_ms: 0,
-                payload: EventPayload::SimHello(HelloPayload {
-                    sim_name: "sim-lock".into(),
-                    source: "test".into(),
-                    session_started_ms: 0,
-                    world_width: 1280.0,
-                    world_height: 720.0,
-                    ant_count: 26,
-                    food_count: 5000,
-                }),
-            })
-            .expect("sim_hello should be accepted");
-        state
-            .apply_event(EventEnvelope {
-                event_type: "sim_food_snapshot".into(),
-                sim_id: "sim-lock".into(),
-                seq: 2,
-                timestamp_ms: 0,
-                payload: EventPayload::SimFoodSnapshot(FoodSnapshotPayload {
-                    foods: (0..5000)
-                        .map(|index| StartupFoodPayload {
-                            food_id: index,
-                            x: ((index * 17) % 4000) as f32,
-                            y: ((index * 19) % 4000) as f32,
-                        })
-                        .collect(),
-                }),
-            })
-            .expect("sim_food_snapshot should be accepted");
+    // ---- helpers ----
 
-        state.register_api_demand().await;
-
-        let blocked_for = tokio::task::spawn_blocking({
-            let state = state.clone();
-            move || {
-                let deadline = Instant::now() + Duration::from_secs(5);
-                let mut blocked_since: Option<Instant> = None;
-                loop {
-                    match state.inner.store.try_hold_shard_for_test("sim-lock") {
-                        Some(guard) => {
-                            drop(guard);
-                            if let Some(started_at) = blocked_since {
-                                return started_at.elapsed();
-                            }
-                            if Instant::now() >= deadline {
-                                return Duration::ZERO;
-                            }
-                        }
-                        None => {
-                            blocked_since.get_or_insert_with(Instant::now);
-                        }
-                    }
-                    assert!(
-                        Instant::now() < deadline,
-                        "expected refresh to briefly block writes and then release the store lock"
-                    );
-                    std::thread::sleep(Duration::from_millis(1));
-                }
-            }
-        })
-        .await
-        .expect("lock timing task should join");
-
-        assert!(
-            blocked_for < Duration::from_millis(25),
-            "expected refresh to release the store lock quickly, but writes were blocked for {:?}",
-            blocked_for
-        );
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-    async fn refresh_coordination_contention_does_not_block_runtime_progress() {
-        let state = AppState::new();
-        let refresh_guard = state.inner.refresh.lock().await;
-
-        let contender = {
-            let state = state.clone();
-            tokio::spawn(async move {
-                state.register_api_demand().await;
-            })
-        };
-
-        tokio::task::yield_now().await;
-
-        let ticked = tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        });
-
-        let runtime_made_progress = tokio::time::timeout(Duration::from_millis(60), ticked)
-            .await
-            .is_ok();
-        drop(refresh_guard);
-        contender.await.expect("contender task should join");
-
-        assert!(
-            runtime_made_progress,
-            "refresh coordination contention should not block unrelated async progress"
-        );
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn unrelated_sim_writes_do_not_block_on_global_store_contention() {
-        let state = AppState::new();
-        state
-            .apply_event(EventEnvelope {
-                event_type: "sim_hello".into(),
-                sim_id: "sim-a".into(),
-                seq: 1,
-                timestamp_ms: 0,
-                payload: EventPayload::SimHello(HelloPayload {
-                    sim_name: "sim-a".into(),
-                    source: "test".into(),
-                    session_started_ms: 0,
-                    world_width: 1280.0,
-                    world_height: 720.0,
-                    ant_count: 26,
-                    food_count: 1,
-                }),
-            })
-            .expect("sim-a hello should be accepted");
-        state
-            .apply_event(EventEnvelope {
-                event_type: "sim_hello".into(),
-                sim_id: "sim-b".into(),
-                seq: 1,
-                timestamp_ms: 0,
-                payload: EventPayload::SimHello(HelloPayload {
-                    sim_name: "sim-b".into(),
-                    source: "test".into(),
-                    session_started_ms: 0,
-                    world_width: 1280.0,
-                    world_height: 720.0,
-                    ant_count: 26,
-                    food_count: 1,
-                }),
-            })
-            .expect("sim-b hello should be accepted");
-
-        let blocked_sim = "sim-a".to_string();
-        let mut free_sim = "sim-b".to_string();
-        while state.inner.store.shard_index_for_test(&blocked_sim)
-            == state.inner.store.shard_index_for_test(&free_sim)
-        {
-            free_sim.push('x');
+    fn sim_hello_envelope(sim_id: &str) -> EventEnvelope {
+        EventEnvelope {
+            event_type: "sim_hello".into(),
+            sim_id: sim_id.into(),
+            seq: 1,
+            timestamp_ms: 0,
+            payload: EventPayload::SimHello(HelloPayload {
+                sim_name: sim_id.into(),
+                source: "test".into(),
+                session_started_ms: 0,
+                world_width: 1280.0,
+                world_height: 720.0,
+                ant_count: 26,
+                food_count: 2,
+            }),
         }
-
-        let store_guard = state.inner.store.hold_shard_for_test(&blocked_sim);
-        let progressed = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let marker = progressed.clone();
-        let writer = std::thread::spawn({
-            let state = state.clone();
-            let free_sim = free_sim.clone();
-            move || {
-                state
-                    .apply_event(EventEnvelope {
-                        event_type: "ant_turn_move".into(),
-                        sim_id: free_sim,
-                        seq: 2,
-                        timestamp_ms: 0,
-                        payload: EventPayload::AntTurnMove(crate::protocol::TurnMovePayload {
-                            ant_id: "ant-1".into(),
-                            x: 1.0,
-                            y: 1.0,
-                            direction_x: 0.0,
-                            direction_y: 1.0,
-                            frame: 2,
-                        }),
-                    })
-                    .expect("sim-b move should be accepted");
-                marker.store(true, Ordering::SeqCst);
-            }
-        });
-
-        std::thread::sleep(Duration::from_millis(50));
-        let write_completed = progressed.load(Ordering::SeqCst);
-        drop(store_guard);
-        writer.join().expect("writer thread should join");
-
-        assert!(
-            write_completed,
-            "writing one sim should not block behind unrelated store contention"
-        );
-    }
-
-    #[test]
-    fn heavy_refresh_compute_does_not_starve_runtime_progress() {
-        let (tick_tx, tick_rx) = std::sync::mpsc::channel();
-
-        let runtime_thread = std::thread::spawn(move || {
-            let runtime = tokio::runtime::Builder::new_multi_thread()
-                .worker_threads(1)
-                .enable_time()
-                .build()
-                .expect("test runtime should build");
-            runtime.block_on(async move {
-                let state = AppState::new();
-                state
-                    .apply_event(EventEnvelope {
-                        event_type: "sim_hello".into(),
-                        sim_id: "sim-cpu".into(),
-                        seq: 1,
-                        timestamp_ms: 0,
-                        payload: EventPayload::SimHello(HelloPayload {
-                            sim_name: "sim-cpu".into(),
-                            source: "test".into(),
-                            session_started_ms: 0,
-                            world_width: 1280.0,
-                            world_height: 720.0,
-                            ant_count: 26,
-                            food_count: 5000,
-                        }),
-                    })
-                    .expect("sim hello should be accepted");
-                state
-                    .apply_event(EventEnvelope {
-                        event_type: "sim_food_snapshot".into(),
-                        sim_id: "sim-cpu".into(),
-                        seq: 2,
-                        timestamp_ms: 0,
-                        payload: EventPayload::SimFoodSnapshot(FoodSnapshotPayload {
-                            foods: (0..5000)
-                                .map(|index| StartupFoodPayload {
-                                    food_id: index,
-                                    x: ((index * 17) % 4000) as f32,
-                                    y: ((index * 19) % 4000) as f32,
-                                })
-                                .collect(),
-                        }),
-                    })
-                    .expect("sim food snapshot should be accepted");
-
-                state.register_api_demand().await;
-                tokio::task::yield_now().await;
-
-                tokio::spawn(async move {
-                    tokio::time::sleep(Duration::from_millis(20)).await;
-                    let _ = tick_tx.send(());
-                });
-
-                tokio::time::sleep(Duration::from_millis(100)).await;
-            });
-        });
-
-        let runtime_made_progress = tick_rx.recv_timeout(Duration::from_millis(60)).is_ok();
-        runtime_thread
-            .join()
-            .expect("runtime thread should join after heavy refresh test");
-
-        assert!(
-            runtime_made_progress,
-            "heavy refresh compute should not starve unrelated runtime progress"
-        );
     }
 
     fn sim_food_snapshot_envelope(sim_id: &str, count: usize) -> EventEnvelope {
@@ -806,13 +545,7 @@ mod tests {
         }
     }
 
-    fn food_drop_envelope(
-        sim_id: &str,
-        slot: usize,
-        x: f32,
-        y: f32,
-        seq: u64,
-    ) -> EventEnvelope {
+    fn food_drop_envelope(sim_id: &str, slot: usize, x: f32, y: f32, seq: u64) -> EventEnvelope {
         EventEnvelope {
             event_type: "food_drop".into(),
             sim_id: sim_id.into(),
@@ -830,131 +563,8 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn api_demand_expires_before_later_dirty_events_refresh_snapshot() {
-        let state = AppState::new_with_tuning(RefreshTuning {
-            min_refresh_interval: Duration::ZERO,
-            max_refresh_interval: Duration::ZERO,
-            refresh_multiplier: 1,
-            api_demand_ttl: Duration::from_millis(30),
-        });
-
-        let sid = "sim-demand-expiry";
-        state
-            .apply_event(EventEnvelope {
-                event_type: "sim_hello".into(),
-                sim_id: sid.into(),
-                seq: 1,
-                timestamp_ms: 0,
-                payload: EventPayload::SimHello(HelloPayload {
-                    sim_name: sid.into(),
-                    source: "test".into(),
-                    session_started_ms: 0,
-                    world_width: 1280.0,
-                    world_height: 720.0,
-                    ant_count: 26,
-                    food_count: 2,
-                }),
-            })
-            .expect("sim hello should be accepted");
-        state
-            .apply_event(sim_food_snapshot_envelope(sid, 2))
-            .expect("snapshot");
-        state
-            .apply_event(food_pickup_envelope(sid, 0, 3))
-            .expect("pickup 0");
-        state
-            .apply_event(food_pickup_envelope(sid, 1, 4))
-            .expect("pickup 1");
-
-        state
-            .apply_event(food_drop_envelope(sid, 0, 1.0, 1.0, 5))
-            .expect("food drop should be accepted");
-
-        state.register_api_demand().await;
-        wait_for_live_loose_food_count(&state, 1).await;
-        wait_for_analytics_occupied_cells(&state, 1).await;
-
-        tokio::time::sleep(Duration::from_millis(50)).await;
-
-        state
-            .apply_event(food_drop_envelope(sid, 1, 2.0, 2.0, 6))
-            .expect("second food drop should be accepted");
-
-        tokio::time::sleep(Duration::from_millis(20)).await;
-        let stale_snapshot = current_snapshot_json(&state);
-        assert_eq!(stale_snapshot["summary"]["live_summary"]["loose_food_count"], 2);
-        assert_eq!(
-            stale_snapshot["summary"]["analytics_summary"]["occupied_cell_count"],
-            1
-        );
-        assert_eq!(stale_snapshot["summary"]["analytics_meta"]["is_stale"], true);
-
-        state.register_api_demand().await;
-        wait_for_live_loose_food_count(&state, 2).await;
-        wait_for_analytics_occupied_cells(&state, 1).await;
-    }
-
-    #[tokio::test]
-    async fn active_demand_refreshes_are_cadence_limited() {
-        let state = AppState::new_with_tuning(RefreshTuning {
-            min_refresh_interval: Duration::from_millis(60),
-            max_refresh_interval: Duration::from_millis(60),
-            refresh_multiplier: 1,
-            api_demand_ttl: Duration::from_secs(1),
-        });
-
-        let sid = "sim-cadence";
-        state
-            .apply_event(EventEnvelope {
-                event_type: "sim_hello".into(),
-                sim_id: sid.into(),
-                seq: 1,
-                timestamp_ms: 0,
-                payload: EventPayload::SimHello(HelloPayload {
-                    sim_name: sid.into(),
-                    source: "test".into(),
-                    session_started_ms: 0,
-                    world_width: 1280.0,
-                    world_height: 720.0,
-                    ant_count: 26,
-                    food_count: 2,
-                }),
-            })
-            .expect("sim hello should be accepted");
-        state
-            .apply_event(sim_food_snapshot_envelope(sid, 2))
-            .expect("snapshot");
-        state
-            .apply_event(food_pickup_envelope(sid, 0, 3))
-            .expect("pickup 0");
-        state
-            .apply_event(food_pickup_envelope(sid, 1, 4))
-            .expect("pickup 1");
-
-        state
-            .apply_event(food_drop_envelope(sid, 0, 1.0, 1.0, 5))
-            .expect("initial food drop should be accepted");
-
-        state.register_api_demand().await;
-        wait_for_live_loose_food_count(&state, 1).await;
-        wait_for_analytics_occupied_cells(&state, 1).await;
-
-        state
-            .apply_event(food_drop_envelope(sid, 1, 2.0, 2.0, 6))
-            .expect("second food drop should be accepted");
-
-        tokio::time::sleep(Duration::from_millis(20)).await;
-        let stale_snapshot = current_snapshot_json(&state);
-        assert_eq!(stale_snapshot["summary"]["live_summary"]["loose_food_count"], 2);
-        assert_eq!(
-            stale_snapshot["summary"]["analytics_summary"]["occupied_cell_count"],
-            1
-        );
-        assert_eq!(stale_snapshot["summary"]["analytics_meta"]["is_stale"], true);
-
-        wait_for_live_loose_food_count(&state, 2).await;
-        wait_for_analytics_occupied_cells(&state, 1).await;
+    fn current_snapshot_json(state: &AppState) -> Value {
+        serde_json::to_value(state.current_snapshot()).expect("snapshot json")
     }
 
     async fn wait_for_live_loose_food_count(state: &AppState, expected: usize) {
@@ -987,31 +597,13 @@ mod tests {
         }
     }
 
-    fn current_snapshot_json(state: &AppState) -> Value {
-        serde_json::to_value(state.current_snapshot()).expect("snapshot json")
-    }
+    // ---- correctness tests ----
 
     #[tokio::test]
     async fn duplicate_food_drop_does_not_inflate_live_loose_food_count() {
         let state = AppState::new();
         let sid = "sim-dup";
-        state
-            .apply_event(EventEnvelope {
-                event_type: "sim_hello".into(),
-                sim_id: sid.into(),
-                seq: 1,
-                timestamp_ms: 0,
-                payload: EventPayload::SimHello(HelloPayload {
-                    sim_name: sid.into(),
-                    source: "test".into(),
-                    session_started_ms: 0,
-                    world_width: 1280.0,
-                    world_height: 720.0,
-                    ant_count: 1,
-                    food_count: 1,
-                }),
-            })
-            .expect("sim_hello");
+        state.apply_event(sim_hello_envelope(sid)).expect("sim_hello");
         state
             .apply_event(sim_food_snapshot_envelope(sid, 1))
             .expect("snapshot");
@@ -1024,12 +616,14 @@ mod tests {
 
         let snapshot = current_snapshot_json(&state);
         assert_eq!(
-            snapshot["summary"]["live_summary"]["loose_food_count"], 1,
+            snapshot["summary"]["live_summary"]["loose_food_count"],
+            1,
             "duplicate food_drop with same food_id should not inflate live loose_food_count"
         );
         assert_eq!(
-            snapshot["sims"][0]["loose_food_count"], 1,
-            "per-sim loose_food_count should match store truth after duplicate food_drop"
+            snapshot["sims"][0]["loose_food_count"],
+            1,
+            "per-sim loose_food_count should match after duplicate food_drop"
         );
     }
 
@@ -1037,23 +631,7 @@ mod tests {
     async fn pickup_of_missing_food_does_not_deflate_live_loose_food_count() {
         let state = AppState::new();
         let sid = "sim-miss";
-        state
-            .apply_event(EventEnvelope {
-                event_type: "sim_hello".into(),
-                sim_id: sid.into(),
-                seq: 1,
-                timestamp_ms: 0,
-                payload: EventPayload::SimHello(HelloPayload {
-                    sim_name: sid.into(),
-                    source: "test".into(),
-                    session_started_ms: 0,
-                    world_width: 1280.0,
-                    world_height: 720.0,
-                    ant_count: 1,
-                    food_count: 1,
-                }),
-            })
-            .expect("sim_hello");
+        state.apply_event(sim_hello_envelope(sid)).expect("sim_hello");
         state
             .apply_event(sim_food_snapshot_envelope(sid, 1))
             .expect("snapshot");
@@ -1077,12 +655,286 @@ mod tests {
 
         let snapshot = current_snapshot_json(&state);
         assert_eq!(
-            snapshot["summary"]["live_summary"]["loose_food_count"], 1,
+            snapshot["summary"]["live_summary"]["loose_food_count"],
+            1,
             "pickup of non-existent food should not deflate live loose_food_count"
         );
         assert_eq!(
-            snapshot["sims"][0]["loose_food_count"], 1,
-            "per-sim loose_food_count should match store truth after pickup of missing food"
+            snapshot["sims"][0]["loose_food_count"],
+            1,
+            "per-sim loose_food_count should match after pickup of missing food"
+        );
+    }
+
+    // ---- analytics scheduling tests ----
+
+    #[tokio::test]
+    async fn api_demand_expires_before_later_dirty_events_refresh_snapshot() {
+        let state = AppState::new_with_tuning(RefreshTuning {
+            min_refresh_interval: Duration::ZERO,
+            max_refresh_interval: Duration::ZERO,
+            refresh_multiplier: 1,
+            api_demand_ttl: Duration::from_millis(30),
+        });
+
+        let sid = "sim-demand-expiry";
+        state.apply_event(sim_hello_envelope(sid)).expect("sim hello");
+        state
+            .apply_event(sim_food_snapshot_envelope(sid, 2))
+            .expect("snapshot");
+        state.apply_event(food_pickup_envelope(sid, 0, 3)).expect("pickup 0");
+        state.apply_event(food_pickup_envelope(sid, 1, 4)).expect("pickup 1");
+        state
+            .apply_event(food_drop_envelope(sid, 0, 1.0, 1.0, 5))
+            .expect("food drop");
+
+        state.register_api_demand().await;
+        wait_for_live_loose_food_count(&state, 1).await;
+        wait_for_analytics_occupied_cells(&state, 1).await;
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        state
+            .apply_event(food_drop_envelope(sid, 1, 2.0, 2.0, 6))
+            .expect("second food drop");
+
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        let stale_snapshot = current_snapshot_json(&state);
+        assert_eq!(stale_snapshot["summary"]["live_summary"]["loose_food_count"], 2);
+        assert_eq!(
+            stale_snapshot["summary"]["analytics_summary"]["occupied_cell_count"],
+            1
+        );
+        assert_eq!(stale_snapshot["summary"]["analytics_meta"]["is_stale"], true);
+
+        state.register_api_demand().await;
+        wait_for_live_loose_food_count(&state, 2).await;
+        wait_for_analytics_occupied_cells(&state, 1).await;
+    }
+
+    #[tokio::test]
+    async fn active_demand_refreshes_are_cadence_limited() {
+        let state = AppState::new_with_tuning(RefreshTuning {
+            min_refresh_interval: Duration::from_millis(60),
+            max_refresh_interval: Duration::from_millis(60),
+            refresh_multiplier: 1,
+            api_demand_ttl: Duration::from_secs(1),
+        });
+
+        let sid = "sim-cadence";
+        state.apply_event(sim_hello_envelope(sid)).expect("sim hello");
+        state
+            .apply_event(sim_food_snapshot_envelope(sid, 2))
+            .expect("snapshot");
+        state.apply_event(food_pickup_envelope(sid, 0, 3)).expect("pickup 0");
+        state.apply_event(food_pickup_envelope(sid, 1, 4)).expect("pickup 1");
+        state
+            .apply_event(food_drop_envelope(sid, 0, 1.0, 1.0, 5))
+            .expect("initial food drop");
+
+        state.register_api_demand().await;
+        wait_for_live_loose_food_count(&state, 1).await;
+        wait_for_analytics_occupied_cells(&state, 1).await;
+
+        state
+            .apply_event(food_drop_envelope(sid, 1, 2.0, 2.0, 6))
+            .expect("second food drop");
+
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        let stale_snapshot = current_snapshot_json(&state);
+        assert_eq!(stale_snapshot["summary"]["live_summary"]["loose_food_count"], 2);
+        assert_eq!(
+            stale_snapshot["summary"]["analytics_summary"]["occupied_cell_count"],
+            1
+        );
+        assert_eq!(stale_snapshot["summary"]["analytics_meta"]["is_stale"], true);
+
+        wait_for_live_loose_food_count(&state, 2).await;
+        wait_for_analytics_occupied_cells(&state, 1).await;
+    }
+
+    // ---- concurrency tests ----
+
+    /// Verify that the analytics worker does not block ingest writes.
+    /// With atomic food slots, analytics reads and ingest writes are fully
+    /// independent -- this test documents that invariant.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn analytics_refresh_does_not_block_ingest_writes() {
+        let state = AppState::new();
+        let sid = "sim-noblock";
+        state.apply_event(sim_hello_envelope(sid)).expect("sim hello");
+        state
+            .apply_event(EventEnvelope {
+                event_type: "sim_food_snapshot".into(),
+                sim_id: sid.into(),
+                seq: 2,
+                timestamp_ms: 0,
+                payload: EventPayload::SimFoodSnapshot(FoodSnapshotPayload {
+                    foods: (0..5000)
+                        .map(|index| StartupFoodPayload {
+                            food_id: index,
+                            x: ((index * 17) % 4000) as f32,
+                            y: ((index * 19) % 4000) as f32,
+                        })
+                        .collect(),
+                }),
+            })
+            .expect("large snapshot");
+
+        state.register_api_demand().await;
+
+        // While analytics is computing (spawn_blocking with O(N^2) work),
+        // ingest writes should complete immediately since they only do atomic ops.
+        let write_times: Vec<Duration> = (0..20)
+            .map(|i| {
+                let state = state.clone();
+                let sid = sid.to_string();
+                let start = Instant::now();
+                state
+                    .apply_event(food_pickup_envelope(&sid, i % 5000, i as u64 + 10))
+                    .expect("pickup should succeed");
+                start.elapsed()
+            })
+            .collect();
+
+        let max_write_time = write_times.iter().max().copied().unwrap_or_default();
+        assert!(
+            max_write_time < Duration::from_millis(50),
+            "ingest writes should complete quickly regardless of analytics, max was {:?}",
+            max_write_time
+        );
+    }
+
+    /// Verify that two sims with different handles can write fully concurrently.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn concurrent_writes_to_different_sims_do_not_block_each_other() {
+        let state = AppState::new();
+
+        for sid in ["sim-x", "sim-y"] {
+            state.apply_event(sim_hello_envelope(sid)).expect("hello");
+            state
+                .apply_event(sim_food_snapshot_envelope(sid, 10))
+                .expect("snapshot");
+        }
+
+        let wrote_x = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let wrote_y = Arc::new(std::sync::atomic::AtomicBool::new(false));
+
+        let state_x = state.clone();
+        let flag_x = wrote_x.clone();
+        let writer_x = std::thread::spawn(move || {
+            for i in 0..100 {
+                state_x
+                    .apply_event(food_pickup_envelope("sim-x", i % 10, i as u64 + 10))
+                    .expect("sim-x write");
+            }
+            flag_x.store(true, Ordering::SeqCst);
+        });
+
+        let state_y = state.clone();
+        let flag_y = wrote_y.clone();
+        let writer_y = std::thread::spawn(move || {
+            for i in 0..100 {
+                state_y
+                    .apply_event(food_pickup_envelope("sim-y", i % 10, i as u64 + 10))
+                    .expect("sim-y write");
+            }
+            flag_y.store(true, Ordering::SeqCst);
+        });
+
+        writer_x.join().expect("sim-x writer should join");
+        writer_y.join().expect("sim-y writer should join");
+
+        assert!(wrote_x.load(Ordering::SeqCst));
+        assert!(wrote_y.load(Ordering::SeqCst));
+
+        let snapshot = current_snapshot_json(&state);
+        assert_eq!(snapshot["summary"]["live_summary"]["connected_sim_count"], 2);
+    }
+
+    /// Verify the refresh coordination mutex does not block unrelated async tasks.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn refresh_coordination_contention_does_not_block_runtime_progress() {
+        let state = AppState::new();
+        let refresh_guard = state.inner.refresh.lock().await;
+
+        let contender = {
+            let state = state.clone();
+            tokio::spawn(async move {
+                state.register_api_demand().await;
+            })
+        };
+
+        tokio::task::yield_now().await;
+
+        let ticked = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        });
+
+        let runtime_made_progress = tokio::time::timeout(Duration::from_millis(60), ticked)
+            .await
+            .is_ok();
+        drop(refresh_guard);
+        contender.await.expect("contender task should join");
+
+        assert!(
+            runtime_made_progress,
+            "refresh coordination contention should not block unrelated async progress"
+        );
+    }
+
+    /// Verify that heavy analytics compute in spawn_blocking does not starve runtime.
+    #[test]
+    fn heavy_refresh_compute_does_not_starve_runtime_progress() {
+        let (tick_tx, tick_rx) = std::sync::mpsc::channel();
+
+        let runtime_thread = std::thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(1)
+                .enable_time()
+                .build()
+                .expect("test runtime should build");
+            runtime.block_on(async move {
+                let state = AppState::new();
+                state.apply_event(sim_hello_envelope("sim-cpu")).expect("hello");
+                state
+                    .apply_event(EventEnvelope {
+                        event_type: "sim_food_snapshot".into(),
+                        sim_id: "sim-cpu".into(),
+                        seq: 2,
+                        timestamp_ms: 0,
+                        payload: EventPayload::SimFoodSnapshot(FoodSnapshotPayload {
+                            foods: (0..5000)
+                                .map(|index| StartupFoodPayload {
+                                    food_id: index,
+                                    x: ((index * 17) % 4000) as f32,
+                                    y: ((index * 19) % 4000) as f32,
+                                })
+                                .collect(),
+                        }),
+                    })
+                    .expect("food snapshot");
+
+                state.register_api_demand().await;
+                tokio::task::yield_now().await;
+
+                tokio::spawn(async move {
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                    let _ = tick_tx.send(());
+                });
+
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            });
+        });
+
+        let runtime_made_progress = tick_rx.recv_timeout(Duration::from_millis(60)).is_ok();
+        runtime_thread
+            .join()
+            .expect("runtime thread should join after heavy refresh test");
+
+        assert!(
+            runtime_made_progress,
+            "heavy refresh compute should not starve unrelated runtime progress"
         );
     }
 }
