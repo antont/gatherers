@@ -1,268 +1,88 @@
 ## Purpose
 
-This note summarizes how the current Rust backend relates to actor-style ownership and other Rust concurrency options, and which direction looks most promising if this backend evolves further.
+This note describes how the Rust backend's concurrency model ended up, why it looks the way it does, and where actor-style patterns or other refinements might still be worth considering.
 
-The goal is not to argue that the current design is wrong. The goal is to clarify which next-step simplifications would actually fit this codebase well.
+## Current Architecture
 
-## Current Shape
+The Rust backend is a hybrid of three concurrency styles:
 
-The Rust backend today is a hybrid:
+### Shared parallel ingest
 
-- ingest mutates authoritative shared state in `Store`
-- `Store` uses sharded `RwLock<HashMap<String, SimState>>` for concurrent writes by sim
-- each `SimState` owns a stable `Vec<FoodSlot>` indexed by stringified slot ID, eliminating per-event HashMap allocation for food tracking
-- app state keeps separately published live and analytics snapshots
-- one demand-driven refresh worker serializes heavy analytics recomputation
-- dashboard updates are broadcast through one shared fanout channel
+- `Store` uses sharded `RwLock<HashMap<String, SimState>>` for sim-level state
+- each `SimState` owns a stable `Vec<FoodSlot>` for food positions
+- `food_id` is a `usize` on the wire, used directly as a slot index -- no string parsing, no HashMap lookup per food event
+- `sim_food_snapshot` allocates the slot array once; `food_pickup` and `food_drop` mutate slots in place
+- shard-level RwLock contention is low because different sims hash to different shards
 
-That means the system already has one strongly actor-like component:
+### Actor-like analytics worker
 
-- the analytics refresh worker has one serialized execution context
-- it owns refresh timing and demand handling
-- it decides when heavy analytics are recomputed
-- it publishes analytics-derived updates
+- one background task owns refresh timing, demand tracking, and analytics computation
+- it copies lightweight input data from the store under a brief read lock, then releases the lock
+- heavy analytics (nearest-neighbor distance, occupied cell count) runs in `spawn_blocking` off the Tokio runtime
+- it publishes results into a shared analytics snapshot
 
-But the backend is not a pure actor system, because the authoritative ingest state is still shared-memory state protected by locks.
+### Broadcast publication
 
-So, just like the Go backend, the current Rust backend is best described as:
+- live counters are derived incrementally on every ingest event using `EventOutcome` from the store
+- every event broadcasts the current snapshot to dashboard websocket subscribers via `tokio::sync::broadcast`
+- analytics snapshots are updated independently and merged into the broadcast view
 
-- shared-memory ingest/store ownership
-- plus an actor-like analysis worker
+## Why This Shape
 
-## What Rust Changes About The Discussion
+The architecture evolved through measured experiments rather than upfront design:
 
-Rust changes the trade-offs somewhat compared with Go.
+1. **Ingest-analytics coupling was the first bottleneck.** The original Rust backend held a store read lock during expensive analytics, starving writers. Copying raw data under a brief lock and computing outside it was the fix.
 
-In Go, the main question was whether the analysis side should be made more explicitly actor-shaped for clarity.
+2. **Async-inappropriate locking, global store contention, and CPU placement each contributed measurably.** The learning-first experiment showed that replacing `std::sync::Mutex` with atomics, sharding the store, and offloading compute to `spawn_blocking` each moved the breakpoint upward.
 
-In Rust, there is an additional strong option:
+3. **Live-analytics separation was the biggest architectural win.** Splitting cheap per-event live counters from heavy background analytics moved the breakpoint from ~160 to ~2000 clients. The failure mode shifted from stale data to TCP connection exhaustion.
 
-- publish immutable snapshots for readers
+4. **Stable food slot arrays removed the last per-event allocation in the hot path.** Replacing `HashMap<String, FoodPosition>` with `Vec<FoodSlot>` indexed by `usize` eliminated hashing, string allocation, and insert/remove overhead from every food event.
 
-That option is especially attractive in Rust because immutable shared data wrapped in `Arc` is ergonomic and safe, and because the current problem is largely about separating:
+## What The Options Looked Like
 
-- cheap hot-path ingest mutation
-- from safe concurrent reads
-- from heavy background analytics
+Before implementation, five concurrency approaches were considered. Here is how they relate to what was actually built:
 
-So the Rust design space is not just:
+### Option 1: Hybrid with small refinements -- this is what was built
 
-- mutexes vs actors
+The current backend is essentially this option, taken further than originally expected. The sharded store, actor-like worker, and separate live/analytics caches are all refinements of the original hybrid shape.
 
-It is more like:
+### Option 2: More explicitly actor-like analysis side
 
-- shared mutable state with locks
-- actor ownership
-- concurrent map structures
-- immutable published snapshots
+The analytics worker already behaves like an actor: it has serialized execution, owns its refresh policy, and publishes results. It could be made more explicit with a mailbox-style message channel, but the current `Notify` + `AtomicBool` coordination works well and the added plumbing is not currently justified.
 
-## Option 1: Keep The Current Hybrid, With Small Refinements
+### Option 3: Concurrent map for authoritative state
 
-Shape:
+Less relevant now. The per-sim food storage is a stable slot array with direct integer indexing. The remaining `HashMap<String, SimState>` only changes on new sim connections, not on the hot path. Replacing it with `DashMap` or similar would change very little.
 
-- keep the sharded `Store` as authoritative mutable state
-- keep the analytics worker actor-like
-- keep live and analytics caches as separately published derived state
-- continue to use `RwLock` around mutable shared structures
+### Option 4: Immutable published snapshots
 
-Benefits:
+Partially adopted. The analytics snapshot is already computed from a copied input and published for readers. The live snapshot is updated incrementally under a write lock. Moving the live snapshot toward `Arc`-swap publication could reduce read-side contention further, but the current approach already sustains exact live counts through 1500+ concurrent clients.
 
-- smallest change from current code
-- already tested and understood
-- preserves the successful performance result where live counters stay exact through high load
-- keeps the code easy to map to the Go version
+### Option 5: Full actor ownership of all state
 
-Costs:
+Not pursued. The backend's performance improved precisely because ingest writes proceed in parallel across shards. A single actor owning all state would serialize the hot path.
 
-- read locks still exist on the published cache objects
-- ownership remains split between shared state and one worker
-- future coordination logic may become harder to reason about if more caches or workers are added
+## What Might Still Be Worth Changing
 
-This is a good default if the goal is stability and parity rather than deeper architectural change.
+### If read-side contention becomes measurable
 
-## Option 2: Make Only The Analysis Side More Explicitly Actor-Like
+Move the published live snapshot from `RwLock<CachedLiveSnapshot>` to an `Arc`-swap or `ArcSwap` pattern. Readers would clone an `Arc` cheaply instead of holding a read lock. This is a small change that would make the read side fully lock-free.
 
-Shape:
+### If the analytics worker needs richer coordination
 
-- keep ingest writing to the shared store
-- make the analytics/live publication side more explicitly mailbox-driven
-- let one task own:
-  - demand state
-  - refresh cadence
-  - stale/fresh transitions
-  - published analytics snapshot
-  - possibly published live snapshot too
+Introduce explicit message types (`EventApplied`, `DemandRegistered`, `Shutdown`) instead of the current `Notify` + `AtomicBool` pattern. This would make the worker easier to test as a state machine and easier to extend with new coordination triggers.
 
-Possible message types could look like:
+### If sim-level isolation matters more
 
-- `EventApplied`
-- `DashboardWatcherAdded`
-- `DashboardWatcherRemoved`
-- `ApiDemand`
-- `RefreshNow`
-- `Shutdown`
+Move each `SimState` into its own `RwLock` or even a per-sim actor, removing shard-level contention entirely. Currently the sharding is sufficient, but if per-sim write pressure becomes uneven this could help.
 
-Benefits:
+## Summary
 
-- clearer ownership of refresh policy and publication behavior
-- easier to test as a state machine
-- easier to log and reason about transitions
-- removes some coordination from shared mutable fields
+The Rust backend's concurrency model is:
 
-Costs:
+- **parallel shared ingest** with sharded locks and stable per-sim slot arrays
+- **actor-like analytics** with demand-driven scheduling and off-runtime compute
+- **incremental live broadcast** on every event, decoupled from heavy analytics
 
-- authoritative ingest state is still shared-memory state
-- adds channel/message plumbing
-- does not eliminate store locking
-
-This is the most direct Rust equivalent of the “make analysis more actor-like” idea from the Go note.
-
-## Option 3: Use A Concurrent Map For Authoritative State
-
-Examples in Rust would include designs based on structures such as:
-
-- `DashMap`
-- `scc::HashMap`
-- similar fine-grained concurrent containers
-
-Shape:
-
-- replace the sharded `Vec<RwLock<HashMap<...>>>`
-- let the concurrent data structure internalize some of the synchronization
-
-Benefits:
-
-- less custom sharding code
-- concurrent reads and writes become more direct at the container layer
-- may simplify some hot-path mutation code
-
-Costs:
-
-- the synchronization does not disappear; it just moves inside the data structure
-- whole-world analytics still need a consistent materialized read view
-- iteration semantics and snapshot consistency become more subtle
-- it adds a dependency and a different mental model without clearly solving the publish/snapshot question
-
-For this backend, this is now less compelling than before, because the per-sim food storage has already moved from `HashMap<String, FoodPosition>` to a stable `Vec<FoodSlot>`. The remaining HashMap is only the sim-level index (`String -> SimState`), which changes rarely (only on new sim connections). The hot-path mutation is now direct slot writes within a stable array, which is already well-suited to the sharded RwLock model.
-
-## Option 4: Publish Immutable Snapshots For Readers
-
-This is the most Rust-specific and, in many ways, the most interesting option.
-
-Shape:
-
-- keep one authoritative mutable store for ingest writes
-- build immutable live snapshots and immutable analytics snapshots from that state
-- publish them by swapping an `Arc` to the latest snapshot
-- readers use the latest published immutable snapshot without taking a traditional read lock on the payload itself
-
-This can be implemented with patterns such as:
-
-- `Arc` plus swap behind a small lock
-- `ArcSwap`
-- similar read-copy-update style publication
-
-Benefits:
-
-- readers always see a coherent view
-- no reader can observe partially mutated structures
-- read-side access becomes extremely cheap
-- it matches the current architectural split very naturally:
-  - mutable ingest state
-  - separately published live view
-  - separately published analytics view
-
-Costs:
-
-- publishing requires cloning or rebuilding snapshot data
-- this is best for published views, not as the raw ingest store itself
-- writes still need synchronization in the authoritative store
-
-This is not a pure actor model, but it solves the exact thing the backend cares about most:
-
-- ingest should keep moving
-- readers should always see a valid consistent view
-- heavy analytics should be independently publishable
-
-## Option 5: Make The Whole Store Actor-Owned
-
-Shape:
-
-- one task owns all mutable simulation state
-- ingest handlers send event messages to that task
-- API/dashboard reads become request/response messages or subscribe to published snapshots
-- shared mutable maps mostly disappear from the application layer
-
-Benefits:
-
-- very strong ownership story
-- no shared mutable store across tasks
-- some classes of race simply disappear
-
-Costs:
-
-- much larger rewrite
-- more queueing and request/response plumbing
-- higher risk of creating one central bottleneck if not designed carefully
-- less useful if the actual workload benefits from parallel writes across sims
-
-For this backend, this feels too large and too constraining for the current goals.
-
-The backend’s load story improved precisely because writes can proceed across sharded state while analytics is detached. A single fully actor-owned store would simplify ownership, but it would also serialize much more of the hot path.
-
-## Best Fit For This Backend
-
-The best next-step Rust direction is not “actors everywhere.”
-
-It is:
-
-- keep the authoritative ingest store shared and parallel-friendly
-- keep the analytics worker actor-like
-- if the read/publication side needs further cleanup, move published snapshots toward immutable snapshot swapping rather than deeper shared read locking
-
-In other words, the strongest Rust-specific refinement is:
-
-- **shared mutable raw state**
-- **actor-like analysis scheduling**
-- **immutable published views for readers**
-
-That combination fits the current backend especially well because it preserves the architecture that already worked well in measurement:
-
-- ingest stays cheap
-- live counters stay exact and prompt
-- analytics can lag independently
-- readers can be made simpler and safer
-
-## Why This Looks Better Than The Alternatives
-
-Why not full actor ownership of all state?
-
-- it is a much larger rewrite
-- it would likely serialize too much of the ingest path
-- it solves more problems than this backend currently has
-
-Why not jump to a concurrent-map crate first?
-
-- the per-sim food storage is already a stable slot array, not a HashMap
-- the remaining sim-level HashMap changes rarely (only on new connections)
-- the hard part here is coherent publication of views, not only concurrent insertion/removal
-
-Why not just stay exactly as-is forever?
-
-- that is a valid choice for now
-- but if the code grows, immutable published snapshots would likely make the read side easier to reason about than more shared read locks and more mutable cache objects
-
-## Recommended Interpretation
-
-The Rust backend should currently be viewed as:
-
-- a parallel shared-memory ingest/store layer
-- plus an actor-like analytics/publication layer
-
-If it evolves further, the most promising refinement is:
-
-- **not** a full actor rewrite
-- **not** “find a more magical concurrent map”
-- **but** making the published read side more explicitly immutable and snapshot-based
-
-That would likely improve clarity and robustness more than pushing the entire backend into a pure actor model.
+This was not designed upfront. It was arrived at through a sequence of measured bottleneck fixes, each committed with breakpoint evidence. The architecture works well for the current workload and has clear, small next steps if specific pressures emerge.
