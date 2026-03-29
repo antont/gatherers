@@ -10,6 +10,7 @@ use axum::{
         Query, State,
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
+    http::header,
     response::{Html, IntoResponse},
     routing::get,
 };
@@ -19,7 +20,7 @@ use tokio::net::TcpListener;
 use tokio::sync::{Mutex, Notify, broadcast};
 
 use crate::{
-    dashboard::render_dashboard,
+    dashboard::{dashboard_css, dashboard_js, normalize_snapshot, render_dashboard},
     protocol::{EventEnvelope, EventPayload},
     store::{Registry, SimHandle},
     summary::{
@@ -546,6 +547,8 @@ pub async fn serve(addr: &str) -> std::io::Result<()> {
 pub fn build_router_with_state(state: AppState) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
+        .route("/dashboard.css", get(dashboard_stylesheet))
+        .route("/dashboard.js", get(dashboard_script))
         .route("/api/summary", get(summary))
         .route("/api/sims", get(sims))
         .route("/api/breakpoint_totals", get(breakpoint_totals))
@@ -587,7 +590,19 @@ async fn breakpoint_totals(
 }
 
 async fn dashboard(State(state): State<AppState>) -> Html<String> {
-    Html(render_dashboard(&state.current_snapshot()))
+    let _ = state;
+    Html(render_dashboard().to_string())
+}
+
+async fn dashboard_stylesheet() -> impl IntoResponse {
+    ([(header::CONTENT_TYPE, "text/css; charset=utf-8")], dashboard_css())
+}
+
+async fn dashboard_script() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "application/javascript; charset=utf-8")],
+        dashboard_js(),
+    )
 }
 
 async fn ingest_ws(ws: WebSocketUpgrade, State(state): State<AppState>) -> impl IntoResponse {
@@ -626,7 +641,7 @@ async fn handle_ingest_socket(state: AppState, mut socket: WebSocket) {
 }
 
 async fn handle_dashboard_socket(state: AppState, mut socket: WebSocket) {
-    let initial = state.current_snapshot();
+    let initial = normalize_snapshot(&state.current_snapshot());
     if socket
         .send(Message::Text(
             serde_json::to_string(&initial)
@@ -643,9 +658,10 @@ async fn handle_dashboard_socket(state: AppState, mut socket: WebSocket) {
     loop {
         match receiver.recv().await {
             Ok(snapshot) => {
+                let normalized = normalize_snapshot(&snapshot);
                 if socket
                     .send(Message::Text(
-                        serde_json::to_string(&snapshot)
+                        serde_json::to_string(&normalized)
                             .expect("dashboard snapshot json")
                             .into(),
                     ))

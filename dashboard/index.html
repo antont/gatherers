@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Gatherers Backend</title>
+    <link rel="stylesheet" href="/dashboard.css">
+  </head>
+  <body>
+    <main>
+      <h1>Gatherers Backend</h1>
+      <p class="status">Realtime dashboard fed by <span class="accent">/ws/dashboard</span>.</p>
+      <section class="cards">
+        <div class="card">
+          <div class="label">Connected sims</div>
+          <div class="value" id="connected-sims-value">0</div>
+        </div>
+        <div class="card">
+          <div class="label">Loose food</div>
+          <div class="value" id="loose-food-value">0</div>
+        </div>
+        <div class="card">
+          <div class="label">Occupied cells</div>
+          <div class="value" id="occupied-cells-value">0</div>
+        </div>
+        <div class="card">
+          <div class="label">Mean nearest-neighbor distance</div>
+          <div class="value" id="nearest-neighbor-value">0.00</div>
+        </div>
+        <div class="card">
+          <div class="label">Elapsed time</div>
+          <div class="value" id="elapsed-seconds-value">0.0s</div>
+        </div>
+        <div class="card">
+          <div class="label">Events/sec</div>
+          <div class="value" id="events-per-second-value">0.00</div>
+        </div>
+      </section>
+      <section class="panel">
+        <div class="label">Last update</div>
+        <div id="last-updated-value">waiting for websocket snapshot</div>
+      </section>
+      <section class="panel" style="margin-top: 16px;">
+        <div class="label">Connected sims</div>
+        <table>
+          <thead>
+            <tr>
+              <th>Sim</th>
+              <th>Ants</th>
+              <th>Drops</th>
+              <th>Pickups</th>
+              <th>Moves</th>
+              <th>Loose food</th>
+            </tr>
+          </thead>
+          <tbody id="sim-table-body">
+            <tr><td colspan="6">Waiting for realtime data...</td></tr>
+          </tbody>
+        </table>
+      </section>
+    </main>
+    <script src="/dashboard.js"></script>
+  </body>
+</html>

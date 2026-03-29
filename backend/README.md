@@ -190,6 +190,52 @@ When backend mode is enabled, the Rust sim sends:
 
 If `GATHERERS_BACKEND_WS_URL` is unset, the Bevy sim runs standalone and does not try to connect.
 
+## Running many real Bevy sims against the Rust backend
+
+For a local windowed demo with the Rust backend and multiple real Bevy sim processes:
+
+```bash
+./scripts/run_rust_backend_demo.sh
+```
+
+That default launches:
+
+- the Rust backend on `127.0.0.1:18080`
+- `9` Bevy sim windows
+- one unique `sim_id` and seed per process
+- startup speed `10`
+- automatic tiled window positions
+
+The script prints the dashboard URL, then keeps all sims and the backend alive until you press `Ctrl-C`.
+
+Useful options:
+
+```bash
+./scripts/run_rust_backend_demo.sh \
+  --count 9 \
+  --backend-addr 127.0.0.1:18080 \
+  --speed 10 \
+  --seed-base 1 \
+  --sim-id-prefix demo \
+  --grid auto \
+  --window-size 420x260 \
+  --open-dashboard
+```
+
+Notes:
+
+- each sim is a separate OS process running the real Bevy implementation
+- the launcher injects `GATHERERS_SIM_ID`, `GATHERERS_SIM_SEED`, `GATHERERS_STARTUP_SPEED`, window title, and window geometry via env vars
+- using the same `--seed-base`, `--count`, and window sizing reproduces the same initial layouts
+- headless mode is intentionally deferred in this first version; this launcher is for visual local demos first
+
+If you only want a single manually launched sim against the Rust backend, you can still start the backend yourself and run:
+
+```bash
+GATHERERS_BACKEND_RUST_ADDR=127.0.0.1:18080 cargo run --manifest-path backend-rust/Cargo.toml
+GATHERERS_BACKEND_WS_URL=ws://127.0.0.1:18080/ws/ingest cargo run
+```
+
 ## Current architecture choices
 
 - Go HTTP stack: `net/http`

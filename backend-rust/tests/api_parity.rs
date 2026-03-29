@@ -72,6 +72,7 @@ async fn serves_empty_state_http_surface_with_dashboard_bootstrap_ids() {
     );
 
     let dashboard = app
+        .clone()
         .oneshot(
             Request::builder()
                 .uri("/")
@@ -90,20 +91,73 @@ async fn serves_empty_state_http_surface_with_dashboard_bootstrap_ids() {
     )
     .expect("dashboard utf8");
     for required in [
-        "Connected sims",
-        "connected-sims-value",
-        "loose-food-value",
-        "elapsed-seconds-value",
-        "events-per-second-value",
-        "occupied-cells-value",
-        "nearest-neighbor-value",
-        "analytics-age-value",
+        "Gatherers Backend",
+        "dashboard.css",
+        "dashboard.js",
         "sim-table-body",
-        "/ws/dashboard",
     ] {
         assert!(
             dashboard_body.contains(required),
             "expected dashboard HTML to contain {required:?}, body was {dashboard_body:?}"
+        );
+    }
+    assert!(
+        !dashboard_body.contains("<style>"),
+        "expected dashboard HTML shell to load separate assets instead of embedding CSS"
+    );
+    assert!(
+        !dashboard_body.contains("new WebSocket("),
+        "expected dashboard HTML shell to load separate JS instead of embedding websocket logic"
+    );
+
+    let css = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/dashboard.css")
+                .body(Body::empty())
+                .expect("css request"),
+        )
+        .await
+        .expect("css response");
+    assert_eq!(css.status(), StatusCode::OK);
+    let css_body = String::from_utf8(
+        to_bytes(css.into_body(), usize::MAX)
+            .await
+            .expect("css body")
+            .to_vec(),
+    )
+    .expect("css utf8");
+    assert!(
+        css_body.contains(".cards"),
+        "expected stylesheet to include dashboard card layout, got {css_body:?}"
+    );
+
+    let js = app
+        .oneshot(
+            Request::builder()
+                .uri("/dashboard.js")
+                .body(Body::empty())
+                .expect("js request"),
+        )
+        .await
+        .expect("js response");
+    assert_eq!(js.status(), StatusCode::OK);
+    let js_body = String::from_utf8(
+        to_bytes(js.into_body(), usize::MAX)
+            .await
+            .expect("js body")
+            .to_vec(),
+    )
+    .expect("js utf8");
+    for required in [
+        "snapshot.summary.connected_sim_count",
+        "new WebSocket(",
+        "\"/ws/dashboard\"",
+    ] {
+        assert!(
+            js_body.contains(required),
+            "expected dashboard javascript to contain {required:?}, body was {js_body:?}"
         );
     }
 }

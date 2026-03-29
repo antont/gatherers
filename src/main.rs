@@ -3,19 +3,25 @@ use an_gatherers::*;
 use bevy::{
     diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin},
     prelude::*,
-    window::{PresentMode, PrimaryWindow},
+    window::{PresentMode, PrimaryWindow, WindowPosition},
 };
 use log::{error, info};
-use rand::Rng;
 
 fn main() {
     info!("Starting gatherers simulation");
+    let runtime = RuntimeConfig::from_env().expect("runtime config should parse");
     App::new()
         .insert_resource(ClearColor(Colors::BACKGROUND))
-        .insert_resource(SimulationSettings::default())
+        .insert_resource(SimulationSettings {
+            speed_multiplier: runtime.startup_speed,
+        })
+        .insert_resource(BackendClientConfig {
+            url: runtime.backend_ws_url.clone(),
+            sim_id: runtime.sim_id.clone(),
+        })
+        .insert_resource(runtime)
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
-                title: "an-gatherers".to_string(),
                 present_mode: PresentMode::AutoVsync,
                 ..Default::default()
             }),
@@ -38,8 +44,10 @@ fn main() {
 fn setup(
     mut commands: Commands,
     primary_window: Query<&Window, With<PrimaryWindow>>,
+    runtime: Res<RuntimeConfig>,
     settings: Res<SimulationSettings>,
 ) {
+    let runtime = runtime.as_ref();
     commands.spawn(Camera2d::default());
     let window = match primary_window.single() {
         Ok(window) => window,
@@ -50,23 +58,19 @@ fn setup(
     };
 
     let map_size = Vec2::new(window.width(), window.height());
-    let half_x = (map_size.x / 2.0) as i32;
-    let half_y = (map_size.y / 2.0) as i32;
-
-    let ant_count = spawn_ants(&mut commands, half_x, &settings);
-    let food_count = spawn_food(&mut commands, half_x, half_y, &settings);
+    let layout = generate_spawn_layout(map_size, &settings, runtime.seed);
+    let ant_count = spawn_ants(&mut commands, &settings, &layout);
+    let food_count = spawn_food(&mut commands, &settings, &layout);
 
     info!("Spawned {} ants and {} food items", ant_count, food_count);
 }
 
-fn spawn_ants(commands: &mut Commands, half_x: i32, settings: &SimulationSettings) -> usize {
-    let mut rng = rand::rng();
-    let mut count = 0;
-
-    for x in (-half_x..half_x).step_by(Config::ANT_SPAWN_STEP as usize) {
-        let angle = rng.random_range(0.0..2.0 * std::f32::consts::PI);
-        let direction = Vec2::new(angle.cos(), angle.sin());
-
+fn spawn_ants(
+    commands: &mut Commands,
+    settings: &SimulationSettings,
+    layout: &an_gatherers::runtime::SpawnLayout,
+) -> usize {
+    for ant in &layout.ants {
         commands.spawn((
             Ant,
             Sprite {
@@ -74,33 +78,22 @@ fn spawn_ants(commands: &mut Commands, half_x: i32, settings: &SimulationSetting
                 custom_size: Some(Config::ANT_SIZE),
                 ..default()
             },
-            Transform::from_translation(Vec3::new(
-                x as f32,
-                Config::ANT_SPAWN_Y,
-                Config::ANT_Z_LAYER,
-            )),
-            Velocity::from(direction),
+            Transform::from_translation(ant.position),
+            Velocity::from(ant.direction),
             Bounding::from_radius(settings.collision_radius()),
             Collidable,
             BoundaryWrap,
         ));
-        count += 1;
     }
-    count
+    layout.ants.len()
 }
 
 fn spawn_food(
     commands: &mut Commands,
-    half_x: i32,
-    half_y: i32,
     settings: &SimulationSettings,
+    layout: &an_gatherers::runtime::SpawnLayout,
 ) -> usize {
-    let mut rng = rand::rng();
-
-    for _ in 0..Config::FOOD_COUNT {
-        let x = rng.random_range(-half_x..half_x);
-        let y = rng.random_range(-half_y..half_y);
-
+    for position in &layout.food_positions {
         commands.spawn((
             Food,
             Sprite {
@@ -108,16 +101,24 @@ fn spawn_food(
                 custom_size: Some(Config::FOOD_SIZE),
                 ..default()
             },
-            Transform::from_translation(Vec3::new(x as f32, y as f32, Config::FOOD_Z_LAYER)),
+            Transform::from_translation(Vec3::new(position.x, position.y, Config::FOOD_Z_LAYER)),
             Collidable,
             Bounding::from_radius(settings.collision_radius()),
         ));
     }
-    Config::FOOD_COUNT as usize
+    layout.food_positions.len()
 }
 
-fn setup_window(mut windows: Query<&mut Window>) {
+fn setup_window(mut windows: Query<&mut Window>, runtime: Res<RuntimeConfig>) {
+    let runtime = runtime.as_ref();
     if let Ok(mut window) = windows.single_mut() {
+        window.title = runtime.window_title.clone();
+        if let Some((x, y)) = runtime.window_position {
+            window.position = WindowPosition::new(IVec2::new(x, y));
+        }
+        if let Some((width, height)) = runtime.window_size {
+            window.resolution.set(width as f32, height as f32);
+        }
         window.resizable = true;
         window.fit_canvas_to_parent = true;
     }

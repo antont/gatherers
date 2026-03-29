@@ -2,6 +2,7 @@ pub mod boundary;
 pub mod collision;
 pub mod config;
 pub mod net;
+pub mod runtime;
 pub mod spatial_index;
 pub mod ui;
 
@@ -16,6 +17,7 @@ pub use config::{Colors, Config, SimulationSettings};
 pub use net::{
     BackendClientConfig, BackendClientPlugin, BackendSimEvent, PendingBackendEvents,
 };
+pub use runtime::{RuntimeConfig, generate_spawn_layout};
 pub use spatial_index::SpatialIndex;
 pub use ui::UiPlugin;
 
