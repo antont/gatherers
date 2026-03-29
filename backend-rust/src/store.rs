@@ -62,6 +62,11 @@ impl AtomicFoodSlot {
 /// Outcome returned to the caller so it can update global live counters.
 pub struct EventOutcome {
     pub loose_food_delta: isize,
+    pub ant_count: usize,
+    pub pickup_count: usize,
+    pub drop_count: usize,
+    pub turn_move_count: usize,
+    pub sim_loose_food_count: usize,
 }
 
 /// Per-sim state owned exclusively by one WebSocket task.
@@ -171,7 +176,14 @@ impl SimHandle {
                 return Err(format!("unsupported event type: {}", envelope.event_type));
             }
         };
-        Ok(EventOutcome { loose_food_delta })
+        Ok(EventOutcome {
+            loose_food_delta,
+            ant_count: self.ant_count.load(Ordering::Relaxed),
+            pickup_count: self.pickup_count.load(Ordering::Relaxed),
+            drop_count: self.drop_count.load(Ordering::Relaxed),
+            turn_move_count: self.turn_move_count.load(Ordering::Relaxed),
+            sim_loose_food_count: self.loose_food_count.load(Ordering::Relaxed),
+        })
     }
 
     pub fn sim_summary(&self) -> SimSummaryResponse {
@@ -192,6 +204,8 @@ impl SimHandle {
 pub struct Registry {
     sims: RwLock<HashMap<String, Arc<SimHandle>>>,
     pub cell_size: f64,
+    #[cfg(test)]
+    all_handles_calls: AtomicUsize,
 }
 
 impl Default for Registry {
@@ -205,6 +219,8 @@ impl Registry {
         Self {
             sims: RwLock::new(HashMap::new()),
             cell_size,
+            #[cfg(test)]
+            all_handles_calls: AtomicUsize::new(0),
         }
     }
 
@@ -225,6 +241,8 @@ impl Registry {
 
     /// Clone all current sim handles.  Brief read lock only.
     pub fn all_handles(&self) -> Vec<Arc<SimHandle>> {
+        #[cfg(test)]
+        self.all_handles_calls.fetch_add(1, Ordering::Relaxed);
         self.sims
             .read()
             .expect("registry read lock poisoned")
@@ -235,6 +253,11 @@ impl Registry {
 
     pub fn connected_sim_count(&self) -> usize {
         self.sims.read().expect("registry read lock poisoned").len()
+    }
+
+    #[cfg(test)]
+    pub fn all_handles_calls_for_test(&self) -> usize {
+        self.all_handles_calls.load(Ordering::Relaxed)
     }
 
     /// Gather loose food positions for analytics computation.

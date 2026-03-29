@@ -12,7 +12,7 @@ The Rust backend is a hybrid of three concurrency styles:
 - each `SimState` owns a stable `Vec<FoodSlot>` for food positions
 - `food_id` is a `usize` on the wire, used directly as a slot index -- no string parsing, no HashMap lookup per food event
 - `sim_food_snapshot` allocates the slot array once; `food_pickup` and `food_drop` mutate slots in place
-- shard-level RwLock contention is low because different sims hash to different shards
+- every event takes a shard write lock, but contention is low because different sims hash to different shards
 
 ### Actor-like analytics worker
 

@@ -1,7 +1,7 @@
-use std::sync::{
-    Arc, Once, OnceLock, RwLock,
-    atomic::{AtomicBool, AtomicUsize, Ordering},
-};
+use std::{collections::HashMap, sync::{
+    Arc, Once, RwLock,
+    atomic::{AtomicBool, Ordering},
+}};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use axum::{
@@ -22,7 +22,7 @@ use crate::{
     protocol::{EventEnvelope, EventPayload},
     store::{Registry, SimHandle},
     summary::{
-        AnalyticsMetaResponse, CachedAnalyticsSnapshot, CachedSnapshot, LiveSummaryResponse,
+        AnalyticsMetaResponse, CachedAnalyticsSnapshot, CachedLiveSnapshot, CachedSnapshot,
         SimSummaryResponse, SummaryResponse,
     },
 };
@@ -34,10 +34,7 @@ pub struct AppState {
 
 struct AppStateInner {
     registry: Registry,
-    /// Monotonically increasing count of all processed events.
-    global_total_events: AtomicUsize,
-    /// Set once on the first event; used to compute events/sec and elapsed.
-    started_at: OnceLock<Instant>,
+    live_snapshot: RwLock<LiveCacheState>,
     analytics_snapshot: RwLock<CachedAnalyticsSnapshot>,
     refresh: Mutex<RefreshState>,
     analytics_dirty: AtomicBool,
@@ -53,6 +50,14 @@ struct RefreshState {
     dashboard_watchers: usize,
     last_api_demand_at: Option<Instant>,
     next_eligible_at: Option<Instant>,
+}
+
+#[derive(Clone, Debug, Default)]
+struct LiveCacheState {
+    snapshot: CachedLiveSnapshot,
+    index_by_sim: HashMap<String, usize>,
+    started_at: Option<Instant>,
+    total_events: usize,
 }
 
 #[derive(Clone, Copy)]
@@ -90,8 +95,7 @@ impl AppState {
         Self {
             inner: Arc::new(AppStateInner {
                 registry: Registry::default(),
-                global_total_events: AtomicUsize::new(0),
-                started_at: OnceLock::new(),
+                live_snapshot: RwLock::new(LiveCacheState::default()),
                 analytics_snapshot: RwLock::new(CachedAnalyticsSnapshot::default()),
                 refresh: Mutex::new(RefreshState {
                     dashboard_watchers: 0,
@@ -124,11 +128,11 @@ impl AppState {
     ) -> Result<(), String> {
         let analytics_affected = event_affects_analytics(&envelope);
         let outcome = handle.apply_event(&envelope)?;
+        self.apply_live_event(&envelope, &outcome);
 
-        self.inner.global_total_events.fetch_add(1, Ordering::Relaxed);
-        self.inner.started_at.get_or_init(Instant::now);
-
-        let _ = self.inner.dashboard_tx.send(self.current_snapshot());
+        if self.inner.dashboard_tx.receiver_count() > 0 {
+            let _ = self.inner.dashboard_tx.send(self.current_snapshot());
+        }
 
         if analytics_affected {
             self.mark_analytics_stale();
@@ -137,29 +141,20 @@ impl AppState {
             self.signal_refresh();
         }
 
-        let _ = outcome; // loose_food_delta drives per-sim atomic; global derived on read
         Ok(())
     }
 
     /// Build a full snapshot by reading all sim handles and global atomics.
-    /// No live-cache lock -- live counters come directly from handle atomics.
+    /// Live state comes from the cheap published live cache; analytics comes
+    /// from the detached published analytics snapshot.
     pub fn current_snapshot(&self) -> CachedSnapshot {
-        let handles = self.inner.registry.all_handles();
-        let sims: Vec<SimSummaryResponse> =
-            handles.iter().map(|h| h.sim_summary()).collect();
-        let loose_food_count: usize = sims.iter().map(|s| s.loose_food_count).sum();
-        let total_events = self.inner.global_total_events.load(Ordering::Relaxed);
-        let elapsed_seconds = self
+        let live_snapshot = self
             .inner
-            .started_at
-            .get()
-            .map(|t| t.elapsed().as_secs_f64())
-            .unwrap_or(0.0);
-        let events_per_second = if elapsed_seconds > 0.0 {
-            total_events as f64 / elapsed_seconds
-        } else {
-            0.0
-        };
+            .live_snapshot
+            .read()
+            .expect("live snapshot lock poisoned")
+            .snapshot
+            .clone();
 
         let mut analytics_snapshot = self
             .inner
@@ -172,17 +167,41 @@ impl AppState {
 
         CachedSnapshot {
             summary: SummaryResponse {
-                live_summary: LiveSummaryResponse {
-                    connected_sim_count: sims.len(),
-                    loose_food_count,
-                    elapsed_seconds,
-                    events_per_second,
-                },
+                live_summary: live_snapshot.live_summary,
                 analytics_summary: analytics_snapshot.analytics_summary,
                 analytics_meta: analytics_snapshot.analytics_meta,
             },
-            sims,
+            sims: live_snapshot.sims,
         }
+    }
+
+    fn apply_live_event(&self, envelope: &EventEnvelope, outcome: &crate::store::EventOutcome) {
+        let mut live_cache = self
+            .inner
+            .live_snapshot
+            .write()
+            .expect("live snapshot lock poisoned");
+
+        let sim = live_cache.sim_summary_mut(&envelope.sim_id);
+        sim.ant_count = outcome.ant_count;
+        sim.pickup_count = outcome.pickup_count;
+        sim.drop_count = outcome.drop_count;
+        sim.turn_move_count = outcome.turn_move_count;
+        sim.loose_food_count = outcome.sim_loose_food_count;
+
+        live_cache.total_events += 1;
+        if live_cache.started_at.is_none() {
+            live_cache.started_at = Some(Instant::now());
+        }
+        live_cache.snapshot.live_summary.connected_sim_count = live_cache.snapshot.sims.len();
+        live_cache.snapshot.live_summary.loose_food_count = live_cache
+            .snapshot
+            .live_summary
+            .loose_food_count
+            .saturating_add_signed(outcome.loose_food_delta);
+        let (elapsed_seconds, events_per_second) = live_cache.metrics();
+        live_cache.snapshot.live_summary.elapsed_seconds = elapsed_seconds;
+        live_cache.snapshot.live_summary.events_per_second = events_per_second;
     }
 
     async fn register_api_demand(&self) {
@@ -335,6 +354,33 @@ impl AppState {
             interval = self.inner.tuning.max_refresh_interval;
         }
         interval
+    }
+}
+
+impl LiveCacheState {
+    fn sim_summary_mut(&mut self, sim_id: &str) -> &mut SimSummaryResponse {
+        if let Some(index) = self.index_by_sim.get(sim_id).copied() {
+            return &mut self.snapshot.sims[index];
+        }
+
+        let index = self.snapshot.sims.len();
+        self.snapshot.sims.push(SimSummaryResponse {
+            sim_id: sim_id.to_string(),
+            ..SimSummaryResponse::default()
+        });
+        self.index_by_sim.insert(sim_id.to_string(), index);
+        &mut self.snapshot.sims[index]
+    }
+
+    fn metrics(&self) -> (f64, f64) {
+        let Some(started_at) = self.started_at else {
+            return (0.0, 0.0);
+        };
+        let elapsed_seconds = started_at.elapsed().as_secs_f64();
+        if elapsed_seconds <= 0.0 {
+            return (0.0, 0.0);
+        }
+        (elapsed_seconds, self.total_events as f64 / elapsed_seconds)
     }
 }
 
@@ -663,6 +709,23 @@ mod tests {
             snapshot["sims"][0]["loose_food_count"],
             1,
             "per-sim loose_food_count should match after pickup of missing food"
+        );
+    }
+
+    #[test]
+    fn watched_live_event_does_not_rebuild_all_sim_snapshots() {
+        let state = AppState::new();
+        let _watcher = state.inner.dashboard_tx.subscribe();
+        let before = state.inner.registry.all_handles_calls_for_test();
+
+        state
+            .apply_event(sim_hello_envelope("sim-no-scan"))
+            .expect("sim_hello should be accepted");
+
+        let after = state.inner.registry.all_handles_calls_for_test();
+        assert_eq!(
+            after, before,
+            "live event path should not iterate all sim handles just to publish immediate live state"
         );
     }
 
