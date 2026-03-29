@@ -70,3 +70,8 @@ panic = 'abort'
 codegen-units = 1
 opt-level = 's'
 lto = true
+
+[dev-dependencies]
+axum = "0.8.8"
+gatherers-backend-rust = { path = "backend-rust" }
+tokio = { version = "1.50.0", features = ["macros", "rt-multi-thread", "net", "time", "sync"] }
