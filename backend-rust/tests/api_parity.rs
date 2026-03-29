@@ -137,17 +137,17 @@ async fn api_summary_exposes_live_counts_immediately_and_analytics_catch_up_afte
         payload: EventPayload::SimFoodSnapshot(FoodSnapshotPayload {
             foods: vec![
                 StartupFoodPayload {
-                    food_id: "food-1".into(),
+                    food_id: "0".into(),
                     x: 10.0,
                     y: 20.0,
                 },
                 StartupFoodPayload {
-                    food_id: "food-2".into(),
+                    food_id: "1".into(),
                     x: 30.0,
                     y: 40.0,
                 },
                 StartupFoodPayload {
-                    food_id: "food-3".into(),
+                    food_id: "2".into(),
                     x: 50.0,
                     y: 60.0,
                 },
@@ -191,35 +191,73 @@ async fn api_summary_keeps_live_counts_fresh_even_when_analytics_are_stale() {
     let state = AppState::new();
     let app = build_router_with_state(state.clone());
 
+    let sid = "sim-live-vs-analytics";
     state.apply_event(EventEnvelope {
         event_type: "sim_hello".into(),
-        sim_id: "sim-live-vs-analytics".into(),
+        sim_id: sid.into(),
         seq: 1,
         timestamp_ms: 0,
         payload: EventPayload::SimHello(HelloPayload {
-            sim_name: "sim-live-vs-analytics".into(),
+            sim_name: sid.into(),
             source: "rust-bevy".into(),
             session_started_ms: 0,
             world_width: 1280.0,
             world_height: 720.0,
             ant_count: 26,
-            food_count: 1,
+            food_count: 2,
         }),
     })
     .expect("sim_hello should be accepted");
     state.apply_event(EventEnvelope {
-        event_type: "food_drop".into(),
-        sim_id: "sim-live-vs-analytics".into(),
+        event_type: "sim_food_snapshot".into(),
+        sim_id: sid.into(),
         seq: 2,
+        timestamp_ms: 0,
+        payload: EventPayload::SimFoodSnapshot(FoodSnapshotPayload {
+            foods: vec![
+                StartupFoodPayload { food_id: "0".into(), x: 12.0, y: 18.0 },
+                StartupFoodPayload { food_id: "1".into(), x: 22.0, y: 28.0 },
+            ],
+        }),
+    })
+    .expect("sim_food_snapshot should be accepted");
+    state.apply_event(EventEnvelope {
+        event_type: "food_pickup".into(),
+        sim_id: sid.into(),
+        seq: 3,
+        timestamp_ms: 0,
+        payload: EventPayload::FoodPickup(FoodPickupPayload {
+            ant_id: Some("ant-1".into()),
+            food_id: "0".into(),
+            x: None, y: None, direction_x: None, direction_y: None, frame: None,
+        }),
+    })
+    .expect("pickup 0");
+    state.apply_event(EventEnvelope {
+        event_type: "food_pickup".into(),
+        sim_id: sid.into(),
+        seq: 4,
+        timestamp_ms: 0,
+        payload: EventPayload::FoodPickup(FoodPickupPayload {
+            ant_id: Some("ant-1".into()),
+            food_id: "1".into(),
+            x: None, y: None, direction_x: None, direction_y: None, frame: None,
+        }),
+    })
+    .expect("pickup 1");
+    state.apply_event(EventEnvelope {
+        event_type: "food_drop".into(),
+        sim_id: sid.into(),
+        seq: 5,
         timestamp_ms: 0,
         payload: EventPayload::FoodDrop(FoodDropPayload {
             ant_id: Some("ant-1".into()),
-            food_id: "food-1".into(),
+            food_id: "0".into(),
             x: 12.0,
             y: 18.0,
             direction_x: Some(0.0),
             direction_y: Some(1.0),
-            frame: Some(2),
+            frame: Some(5),
         }),
     })
     .expect("first food_drop should be accepted");
@@ -236,17 +274,17 @@ async fn api_summary_keeps_live_counts_fresh_even_when_analytics_are_stale() {
 
     state.apply_event(EventEnvelope {
         event_type: "food_drop".into(),
-        sim_id: "sim-live-vs-analytics".into(),
-        seq: 3,
+        sim_id: sid.into(),
+        seq: 6,
         timestamp_ms: 0,
         payload: EventPayload::FoodDrop(FoodDropPayload {
             ant_id: Some("ant-1".into()),
-            food_id: "food-2".into(),
+            food_id: "1".into(),
             x: 22.0,
             y: 28.0,
             direction_x: Some(0.0),
             direction_y: Some(1.0),
-            frame: Some(3),
+            frame: Some(6),
         }),
     })
     .expect("second food_drop should be accepted");
@@ -297,21 +335,9 @@ async fn api_sims_catches_up_to_direct_ingest_counts() {
         timestamp_ms: 0,
         payload: EventPayload::SimFoodSnapshot(FoodSnapshotPayload {
             foods: vec![
-                StartupFoodPayload {
-                    food_id: "food-1".into(),
-                    x: 10.0,
-                    y: 20.0,
-                },
-                StartupFoodPayload {
-                    food_id: "food-2".into(),
-                    x: 30.0,
-                    y: 40.0,
-                },
-                StartupFoodPayload {
-                    food_id: "food-3".into(),
-                    x: 50.0,
-                    y: 60.0,
-                },
+                StartupFoodPayload { food_id: "0".into(), x: 10.0, y: 20.0 },
+                StartupFoodPayload { food_id: "1".into(), x: 30.0, y: 40.0 },
+                StartupFoodPayload { food_id: "2".into(), x: 50.0, y: 60.0 },
             ],
         }),
     })
@@ -323,7 +349,7 @@ async fn api_sims_catches_up_to_direct_ingest_counts() {
         timestamp_ms: 0,
         payload: EventPayload::FoodPickup(FoodPickupPayload {
             ant_id: Some("ant-1".into()),
-            food_id: "food-1".into(),
+            food_id: "0".into(),
             x: Some(10.0),
             y: Some(20.0),
             direction_x: Some(1.0),
@@ -339,7 +365,7 @@ async fn api_sims_catches_up_to_direct_ingest_counts() {
         timestamp_ms: 0,
         payload: EventPayload::FoodDrop(FoodDropPayload {
             ant_id: Some("ant-1".into()),
-            food_id: "food-4".into(),
+            food_id: "0".into(),
             x: 70.0,
             y: 80.0,
             direction_x: Some(0.0),

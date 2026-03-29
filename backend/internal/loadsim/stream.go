@@ -322,14 +322,10 @@ func buildAntIDs(base string, count int) []string {
 	return ids
 }
 
-func buildFoodIDs(base string, count int) []string {
-	if count <= 1 {
-		return []string{base}
-	}
-
+func buildFoodIDs(_ string, count int) []string {
 	ids := make([]string, 0, count)
 	for i := 0; i < count; i++ {
-		ids = append(ids, fmt.Sprintf("%s-%03d", base, i))
+		ids = append(ids, fmt.Sprintf("%d", i))
 	}
 	return ids
 }

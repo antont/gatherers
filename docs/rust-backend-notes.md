@@ -141,6 +141,24 @@ Two kinds of adaptation were needed:
 
 No Go test logic had to be rewritten for the Rust backend after the base-URL refactor.
 
+## Stable Food Slot Storage
+
+The authoritative per-sim food representation was refactored from a dynamic `HashMap<String, FoodPosition>` to a stable `Vec<FoodSlot>` indexed by slot position.
+
+Key properties:
+
+- `sim_food_snapshot` establishes a fixed-size slot array; the order of foods in the snapshot payload determines slot identity
+- `food_id` in `food_pickup` and `food_drop` events is a stringified slot index (e.g. `"0"`, `"17"`)
+- `food_pickup` clears a slot in place without removing it
+- `food_drop` restores a slot with a new position
+- malformed or out-of-range food IDs are silently ignored
+- `loose_food_count` is maintained as an explicit counter, not derived from container length
+- analytics scans the slot array directly, collecting positions from present slots
+
+This eliminates per-event HashMap allocation, improves data locality for analytics scans, and removes the possibility of count drift from HashMap insert/remove semantics.
+
+The Go loadsim was updated to emit stringified-index food IDs so the breakpoint harness is compatible with both backends.
+
 ## Current Comparison Result
 
 ### Go backend
@@ -149,18 +167,15 @@ The Go backend already has a recorded local breakpoint note in `docs/go-backend-
 
 ### Rust backend
 
-The Rust backend now has stronger post-fix evidence:
+The Rust backend has extensive post-optimization evidence:
 
-- full Rust test suite passes locally
+- full Rust test suite (27 tests) passes locally
 - reused Go lazy-refresh API and dashboard tests pass against fresh Rust backend instances
-- the reused Go exact-count `100` fake-client stress test passes against a fresh Rust backend instance
-- the reused Go breakpoint regression ramp now proves exact behavior through `100` clients and sees the first bad step at `105`
-
-That means the Rust backend is compatible enough for apples-to-apples harness reuse and is clear of the original request-starvation failure mode, but it still has a lower heavy-load breakpoint than the Go backend on this machine.
+- the ingest decoupling stress test verifies exact counts through 40 concurrent clients
+- the Go breakpoint harness proves exact live totals through `1500` clients
+- first observed failure at `1750` clients is purely connection-level (WebSocket dial timeouts), not data staleness or mismatch
 
 ## Remaining Gaps Before Raw TCP
 
-- run and record a fuller Rust breakpoint characterization comparable to `docs/go-backend-breakpoint-findings.md`
-- decide whether the Rust backend should copy the Go adaptive cadence exactly or only semantically
 - decide whether external Go test reuse should eventually spawn fresh Rust processes automatically for zero-state-sensitive tests
 - add a documented native-only TCP framing choice

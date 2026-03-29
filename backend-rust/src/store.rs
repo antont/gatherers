@@ -12,14 +12,33 @@ pub struct EventOutcome {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-struct FoodPosition {
+pub(crate) struct FoodPosition {
+    pub x: f64,
+    pub y: f64,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct FoodSlot {
+    present: bool,
     x: f64,
     y: f64,
 }
 
+impl FoodSlot {
+    fn new(x: f64, y: f64) -> Self {
+        Self { present: true, x, y }
+    }
+
+}
+
+fn parse_slot_index(food_id: &str) -> Option<usize> {
+    food_id.parse::<usize>().ok()
+}
+
 #[derive(Clone, Debug, Default)]
 struct SimState {
-    loose_food: HashMap<String, FoodPosition>,
+    foods: Vec<FoodSlot>,
+    loose_food_count: usize,
     ant_count: usize,
     connected_at: Option<Instant>,
     total_events: usize,
@@ -71,26 +90,19 @@ impl Store {
                 self.with_sim_state_mut(&envelope.sim_id, |state| {
                     state.record_event();
                     state.ant_count = payload.ant_count;
-                    state.loose_food.len()
+                    state.loose_food_count
                 })
             }
             EventPayload::SimFoodSnapshot(payload) => {
                 self.with_sim_state_mut(&envelope.sim_id, |state| {
                     state.record_event();
-                    state.loose_food = payload
+                    state.foods = payload
                         .foods
                         .iter()
-                        .map(|food| {
-                            (
-                                food.food_id.clone(),
-                                FoodPosition {
-                                    x: food.x as f64,
-                                    y: food.y as f64,
-                                },
-                            )
-                        })
+                        .map(|food| FoodSlot::new(food.x as f64, food.y as f64))
                         .collect();
-                    state.loose_food.len()
+                    state.loose_food_count = state.foods.iter().filter(|s| s.present).count();
+                    state.loose_food_count
                 })
             }
             EventPayload::FoodPickup(payload) => self.record_pickup(&envelope.sim_id, payload),
@@ -99,7 +111,7 @@ impl Store {
                 self.with_sim_state_mut(&envelope.sim_id, |state| {
                     state.record_event();
                     state.turn_move_count += 1;
-                    state.loose_food.len()
+                    state.loose_food_count
                 })
             }
             EventPayload::SimHeartbeat(_) | EventPayload::SimGoodbye(_) => {
@@ -126,24 +138,33 @@ impl Store {
     fn record_pickup(&self, sim_id: &str, payload: &FoodPickupPayload) -> usize {
         self.with_sim_state_mut(sim_id, |state| {
             state.record_event();
-            state.loose_food.remove(&payload.food_id);
             state.pickup_count += 1;
-            state.loose_food.len()
+            if let Some(idx) = parse_slot_index(&payload.food_id)
+                && let Some(slot) = state.foods.get_mut(idx)
+                && slot.present
+            {
+                slot.present = false;
+                state.loose_food_count = state.loose_food_count.saturating_sub(1);
+            }
+            state.loose_food_count
         })
     }
 
     fn record_drop(&self, sim_id: &str, payload: &FoodDropPayload) -> usize {
         self.with_sim_state_mut(sim_id, |state| {
             state.record_event();
-            state.loose_food.insert(
-                payload.food_id.clone(),
-                FoodPosition {
-                    x: payload.x as f64,
-                    y: payload.y as f64,
-                },
-            );
             state.drop_count += 1;
-            state.loose_food.len()
+            if let Some(idx) = parse_slot_index(&payload.food_id)
+                && let Some(slot) = state.foods.get_mut(idx)
+            {
+                if !slot.present {
+                    state.loose_food_count += 1;
+                }
+                slot.present = true;
+                slot.x = payload.x as f64;
+                slot.y = payload.y as f64;
+            }
+            state.loose_food_count
         })
     }
 
@@ -162,7 +183,7 @@ impl Store {
                     pickup_count: sim.pickup_count,
                     drop_count: sim.drop_count,
                     turn_move_count: sim.turn_move_count,
-                    loose_food_count: sim.loose_food.len(),
+                    loose_food_count: sim.loose_food_count,
                 });
                 total_events += sim.total_events;
                 if let Some(connected_at) = sim.connected_at {
@@ -171,7 +192,7 @@ impl Store {
                         _ => Some(connected_at),
                     };
                 }
-                loose_food_count += sim.loose_food.len();
+                loose_food_count += sim.loose_food_count;
             }
         }
 
@@ -189,7 +210,11 @@ impl Store {
         for shard in &self.shards {
             let shard = shard.read().expect("store shard lock poisoned");
             for sim in shard.values() {
-                loose_food.extend(sim.loose_food.values().copied());
+                for slot in &sim.foods {
+                    if slot.present {
+                        loose_food.push(FoodPosition { x: slot.x, y: slot.y });
+                    }
+                }
             }
         }
 
@@ -325,4 +350,266 @@ fn mean_nearest_neighbor_distance(positions: &[FoodPosition]) -> f64 {
         .sum::<f64>();
 
     total / positions.len() as f64
+}
+
+#[cfg(test)]
+mod food_slot_tests {
+    use super::*;
+    use crate::protocol::*;
+
+    fn make_envelope(sim_id: &str, payload: EventPayload) -> EventEnvelope {
+        EventEnvelope {
+            event_type: match &payload {
+                EventPayload::SimHello(_) => "sim_hello",
+                EventPayload::SimFoodSnapshot(_) => "sim_food_snapshot",
+                EventPayload::FoodPickup(_) => "food_pickup",
+                EventPayload::FoodDrop(_) => "food_drop",
+                EventPayload::AntTurnMove(_) => "ant_turn_move",
+                EventPayload::SimHeartbeat(_) => "sim_heartbeat",
+                EventPayload::SimGoodbye(_) => "sim_goodbye",
+            }
+            .into(),
+            sim_id: sim_id.into(),
+            seq: 1,
+            timestamp_ms: 1000,
+            payload,
+        }
+    }
+
+    fn snapshot_3_foods(sim_id: &str) -> EventEnvelope {
+        make_envelope(
+            sim_id,
+            EventPayload::SimFoodSnapshot(FoodSnapshotPayload {
+                foods: vec![
+                    StartupFoodPayload { food_id: "0".into(), x: 10.0, y: 20.0 },
+                    StartupFoodPayload { food_id: "1".into(), x: 30.0, y: 40.0 },
+                    StartupFoodPayload { food_id: "2".into(), x: 50.0, y: 60.0 },
+                ],
+            }),
+        )
+    }
+
+    #[test]
+    fn snapshot_builds_stable_slot_array_with_fixed_count() {
+        let store = Store::default();
+        let outcome = store.apply_event(&snapshot_3_foods("sim-a")).unwrap();
+        assert_eq!(outcome.sim_loose_food_count, 3);
+
+        let analytics = store.analytics_input_data();
+        assert_eq!(analytics.loose_food.len(), 3);
+    }
+
+    #[test]
+    fn pickup_clears_slot_without_removing_it() {
+        let store = Store::default();
+        store.apply_event(&snapshot_3_foods("sim-a")).unwrap();
+
+        let outcome = store
+            .apply_event(&make_envelope(
+                "sim-a",
+                EventPayload::FoodPickup(FoodPickupPayload {
+                    ant_id: None,
+                    food_id: "1".into(),
+                    x: None,
+                    y: None,
+                    direction_x: None,
+                    direction_y: None,
+                    frame: None,
+                }),
+            ))
+            .unwrap();
+        assert_eq!(outcome.sim_loose_food_count, 2);
+
+        let analytics = store.analytics_input_data();
+        assert_eq!(analytics.loose_food.len(), 2, "analytics should see 2 present foods");
+    }
+
+    #[test]
+    fn duplicate_food_drop_updates_existing_slot_not_count() {
+        let store = Store::default();
+        store.apply_event(&snapshot_3_foods("sim-a")).unwrap();
+
+        store
+            .apply_event(&make_envelope(
+                "sim-a",
+                EventPayload::FoodPickup(FoodPickupPayload {
+                    ant_id: None,
+                    food_id: "0".into(),
+                    x: None,
+                    y: None,
+                    direction_x: None,
+                    direction_y: None,
+                    frame: None,
+                }),
+            ))
+            .unwrap();
+
+        let outcome = store
+            .apply_event(&make_envelope(
+                "sim-a",
+                EventPayload::FoodDrop(FoodDropPayload {
+                    ant_id: None,
+                    food_id: "0".into(),
+                    x: 99.0,
+                    y: 88.0,
+                    direction_x: None,
+                    direction_y: None,
+                    frame: None,
+                }),
+            ))
+            .unwrap();
+        assert_eq!(outcome.sim_loose_food_count, 3, "drop of picked-up slot restores count");
+
+        let again = store
+            .apply_event(&make_envelope(
+                "sim-a",
+                EventPayload::FoodDrop(FoodDropPayload {
+                    ant_id: None,
+                    food_id: "0".into(),
+                    x: 77.0,
+                    y: 66.0,
+                    direction_x: None,
+                    direction_y: None,
+                    frame: None,
+                }),
+            ))
+            .unwrap();
+        assert_eq!(
+            again.sim_loose_food_count, 3,
+            "duplicate drop of already-present slot must not inflate count"
+        );
+    }
+
+    #[test]
+    fn out_of_range_slot_id_does_not_change_count() {
+        let store = Store::default();
+        store.apply_event(&snapshot_3_foods("sim-a")).unwrap();
+
+        let outcome = store
+            .apply_event(&make_envelope(
+                "sim-a",
+                EventPayload::FoodDrop(FoodDropPayload {
+                    ant_id: None,
+                    food_id: "999".into(),
+                    x: 1.0,
+                    y: 2.0,
+                    direction_x: None,
+                    direction_y: None,
+                    frame: None,
+                }),
+            ))
+            .unwrap();
+        assert_eq!(
+            outcome.sim_loose_food_count, 3,
+            "out-of-range drop must not inflate count"
+        );
+    }
+
+    #[test]
+    fn malformed_slot_id_does_not_change_count() {
+        let store = Store::default();
+        store.apply_event(&snapshot_3_foods("sim-a")).unwrap();
+
+        let outcome = store
+            .apply_event(&make_envelope(
+                "sim-a",
+                EventPayload::FoodPickup(FoodPickupPayload {
+                    ant_id: None,
+                    food_id: "not-a-number".into(),
+                    x: None,
+                    y: None,
+                    direction_x: None,
+                    direction_y: None,
+                    frame: None,
+                }),
+            ))
+            .unwrap();
+        assert_eq!(
+            outcome.sim_loose_food_count, 3,
+            "malformed food_id must not change count"
+        );
+    }
+
+    #[test]
+    fn analytics_scan_returns_only_present_food_positions() {
+        let store = Store::default();
+        store.apply_event(&snapshot_3_foods("sim-a")).unwrap();
+
+        store
+            .apply_event(&make_envelope(
+                "sim-a",
+                EventPayload::FoodPickup(FoodPickupPayload {
+                    ant_id: None,
+                    food_id: "1".into(),
+                    x: None,
+                    y: None,
+                    direction_x: None,
+                    direction_y: None,
+                    frame: None,
+                }),
+            ))
+            .unwrap();
+
+        let analytics = store.analytics_input_data();
+        assert_eq!(analytics.loose_food.len(), 2);
+
+        let positions: Vec<(f64, f64)> = analytics
+            .loose_food
+            .iter()
+            .map(|p| (p.x, p.y))
+            .collect();
+        assert!(positions.contains(&(10.0, 20.0)), "slot 0 should be present");
+        assert!(
+            !positions.contains(&(30.0, 40.0)),
+            "slot 1 was picked up, should not appear"
+        );
+        assert!(positions.contains(&(50.0, 60.0)), "slot 2 should be present");
+    }
+
+    #[test]
+    fn food_drop_updates_slot_position() {
+        let store = Store::default();
+        store.apply_event(&snapshot_3_foods("sim-a")).unwrap();
+
+        store
+            .apply_event(&make_envelope(
+                "sim-a",
+                EventPayload::FoodPickup(FoodPickupPayload {
+                    ant_id: None,
+                    food_id: "0".into(),
+                    x: None,
+                    y: None,
+                    direction_x: None,
+                    direction_y: None,
+                    frame: None,
+                }),
+            ))
+            .unwrap();
+
+        store
+            .apply_event(&make_envelope(
+                "sim-a",
+                EventPayload::FoodDrop(FoodDropPayload {
+                    ant_id: None,
+                    food_id: "0".into(),
+                    x: 99.0,
+                    y: 88.0,
+                    direction_x: None,
+                    direction_y: None,
+                    frame: None,
+                }),
+            ))
+            .unwrap();
+
+        let analytics = store.analytics_input_data();
+        let positions: Vec<(f64, f64)> = analytics
+            .loose_food
+            .iter()
+            .map(|p| (p.x, p.y))
+            .collect();
+        assert!(
+            positions.contains(&(99.0, 88.0)),
+            "slot 0 should be at new drop position"
+        );
+    }
 }

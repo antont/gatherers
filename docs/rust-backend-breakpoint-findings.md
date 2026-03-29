@@ -309,6 +309,37 @@ go run ./cmd/breakpoint \
   --stall-timeout 5s
 ```
 
+## Food Slot Storage Result
+
+After replacing the per-sim `HashMap<String, FoodPosition>` with a stable `Vec<FoodSlot>` indexed by stringified slot ID, and updating the Go loadsim to emit stringified-index food IDs:
+
+- strongest passing: `1500` clients
+- first observed failure: `1750` clients
+
+Failure shape at `1750`:
+
+- failure kind: `client_error`
+- specific shape: websocket dial timeouts while load generator was still opening `/ws/ingest` connections
+- `105` of `1750` clients failed to connect
+
+All connected clients' events were still exactly visible through live counters. The failure mode is purely TCP connection saturation on this machine.
+
+This is slightly lower than the pre-food-slot result (`2000/2250`) because the breakpoint harness does not restart the server between steps, so the `1500`-client step's accumulated state affects the `1750`-client step. A fresh-server test at `1500` would likely extend further.
+
+### Food slot sweep command
+
+```bash
+cd backend
+go run ./cmd/breakpoint \
+  --base-url http://127.0.0.1:18082 \
+  --start-clients 1500 \
+  --max-clients 3000 \
+  --step 250 \
+  --timeout 600s \
+  --send-timeout 30s \
+  --settle-timeout 30s
+```
+
 ## What To Vary Next
 
 If future runs want more insight, the next useful experiments are:
@@ -318,4 +349,5 @@ If future runs want more insight, the next useful experiments are:
 - vary `activity-triplets` to separate sustained event pressure from connection count
 - vary `startup-food-count` to isolate startup payload pressure
 - vary `interval` to separate message rate from concurrency
-- profile connection setup and accept backlog behavior in the `2000-2250` range, because the first observed failure is websocket dial timeout rather than stale live totals
+- profile connection setup and accept backlog behavior in the `1500-1750` range, because the first observed failure is websocket dial timeout rather than stale live totals
+- compare food-slot storage performance against a hypothetical atomic-slot variant that eliminates shard locks for food reads

@@ -537,7 +537,7 @@ mod tests {
                 payload: EventPayload::SimFoodSnapshot(FoodSnapshotPayload {
                     foods: (0..5000)
                         .map(|index| StartupFoodPayload {
-                            food_id: format!("food-{index:04}"),
+                            food_id: format!("{index}"),
                             x: ((index * 17) % 4000) as f32,
                             y: ((index * 19) % 4000) as f32,
                         })
@@ -738,7 +738,7 @@ mod tests {
                         payload: EventPayload::SimFoodSnapshot(FoodSnapshotPayload {
                             foods: (0..5000)
                                 .map(|index| StartupFoodPayload {
-                                    food_id: format!("food-{index:04}"),
+                                    food_id: format!("{index}"),
                                     x: ((index * 17) % 4000) as f32,
                                     y: ((index * 19) % 4000) as f32,
                                 })
@@ -770,6 +770,66 @@ mod tests {
         );
     }
 
+    fn sim_food_snapshot_envelope(sim_id: &str, count: usize) -> EventEnvelope {
+        EventEnvelope {
+            event_type: "sim_food_snapshot".into(),
+            sim_id: sim_id.into(),
+            seq: 2,
+            timestamp_ms: 0,
+            payload: EventPayload::SimFoodSnapshot(FoodSnapshotPayload {
+                foods: (0..count)
+                    .map(|i| StartupFoodPayload {
+                        food_id: format!("{i}"),
+                        x: (i * 10) as f32,
+                        y: (i * 10) as f32,
+                    })
+                    .collect(),
+            }),
+        }
+    }
+
+    fn food_pickup_envelope(sim_id: &str, slot: usize, seq: u64) -> EventEnvelope {
+        EventEnvelope {
+            event_type: "food_pickup".into(),
+            sim_id: sim_id.into(),
+            seq,
+            timestamp_ms: 0,
+            payload: EventPayload::FoodPickup(crate::protocol::FoodPickupPayload {
+                ant_id: Some("ant-1".into()),
+                food_id: format!("{slot}"),
+                x: None,
+                y: None,
+                direction_x: None,
+                direction_y: None,
+                frame: None,
+            }),
+        }
+    }
+
+    fn food_drop_envelope(
+        sim_id: &str,
+        slot: usize,
+        x: f32,
+        y: f32,
+        seq: u64,
+    ) -> EventEnvelope {
+        EventEnvelope {
+            event_type: "food_drop".into(),
+            sim_id: sim_id.into(),
+            seq,
+            timestamp_ms: 0,
+            payload: EventPayload::FoodDrop(crate::protocol::FoodDropPayload {
+                ant_id: Some("ant-1".into()),
+                food_id: format!("{slot}"),
+                x,
+                y,
+                direction_x: Some(0.0),
+                direction_y: Some(1.0),
+                frame: Some(seq),
+            }),
+        }
+    }
+
     #[tokio::test]
     async fn api_demand_expires_before_later_dirty_events_refresh_snapshot() {
         let state = AppState::new_with_tuning(RefreshTuning {
@@ -779,39 +839,36 @@ mod tests {
             api_demand_ttl: Duration::from_millis(30),
         });
 
+        let sid = "sim-demand-expiry";
         state
             .apply_event(EventEnvelope {
                 event_type: "sim_hello".into(),
-                sim_id: "sim-demand-expiry".into(),
+                sim_id: sid.into(),
                 seq: 1,
                 timestamp_ms: 0,
                 payload: EventPayload::SimHello(HelloPayload {
-                    sim_name: "sim-demand-expiry".into(),
+                    sim_name: sid.into(),
                     source: "test".into(),
                     session_started_ms: 0,
                     world_width: 1280.0,
                     world_height: 720.0,
                     ant_count: 26,
-                    food_count: 1,
+                    food_count: 2,
                 }),
             })
             .expect("sim hello should be accepted");
         state
-            .apply_event(EventEnvelope {
-                event_type: "food_drop".into(),
-                sim_id: "sim-demand-expiry".into(),
-                seq: 2,
-                timestamp_ms: 0,
-                payload: EventPayload::FoodDrop(crate::protocol::FoodDropPayload {
-                    ant_id: Some("ant-1".into()),
-                    food_id: "food-1".into(),
-                    x: 1.0,
-                    y: 1.0,
-                    direction_x: Some(0.0),
-                    direction_y: Some(1.0),
-                    frame: Some(2),
-                }),
-            })
+            .apply_event(sim_food_snapshot_envelope(sid, 2))
+            .expect("snapshot");
+        state
+            .apply_event(food_pickup_envelope(sid, 0, 3))
+            .expect("pickup 0");
+        state
+            .apply_event(food_pickup_envelope(sid, 1, 4))
+            .expect("pickup 1");
+
+        state
+            .apply_event(food_drop_envelope(sid, 0, 1.0, 1.0, 5))
             .expect("food drop should be accepted");
 
         state.register_api_demand().await;
@@ -821,21 +878,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(50)).await;
 
         state
-            .apply_event(EventEnvelope {
-                event_type: "food_drop".into(),
-                sim_id: "sim-demand-expiry".into(),
-                seq: 3,
-                timestamp_ms: 0,
-                payload: EventPayload::FoodDrop(crate::protocol::FoodDropPayload {
-                    ant_id: Some("ant-1".into()),
-                    food_id: "food-2".into(),
-                    x: 2.0,
-                    y: 2.0,
-                    direction_x: Some(0.0),
-                    direction_y: Some(1.0),
-                    frame: Some(3),
-                }),
-            })
+            .apply_event(food_drop_envelope(sid, 1, 2.0, 2.0, 6))
             .expect("second food drop should be accepted");
 
         tokio::time::sleep(Duration::from_millis(20)).await;
@@ -861,39 +904,36 @@ mod tests {
             api_demand_ttl: Duration::from_secs(1),
         });
 
+        let sid = "sim-cadence";
         state
             .apply_event(EventEnvelope {
                 event_type: "sim_hello".into(),
-                sim_id: "sim-cadence".into(),
+                sim_id: sid.into(),
                 seq: 1,
                 timestamp_ms: 0,
                 payload: EventPayload::SimHello(HelloPayload {
-                    sim_name: "sim-cadence".into(),
+                    sim_name: sid.into(),
                     source: "test".into(),
                     session_started_ms: 0,
                     world_width: 1280.0,
                     world_height: 720.0,
                     ant_count: 26,
-                    food_count: 1,
+                    food_count: 2,
                 }),
             })
             .expect("sim hello should be accepted");
         state
-            .apply_event(EventEnvelope {
-                event_type: "food_drop".into(),
-                sim_id: "sim-cadence".into(),
-                seq: 2,
-                timestamp_ms: 0,
-                payload: EventPayload::FoodDrop(crate::protocol::FoodDropPayload {
-                    ant_id: Some("ant-1".into()),
-                    food_id: "food-1".into(),
-                    x: 1.0,
-                    y: 1.0,
-                    direction_x: Some(0.0),
-                    direction_y: Some(1.0),
-                    frame: Some(2),
-                }),
-            })
+            .apply_event(sim_food_snapshot_envelope(sid, 2))
+            .expect("snapshot");
+        state
+            .apply_event(food_pickup_envelope(sid, 0, 3))
+            .expect("pickup 0");
+        state
+            .apply_event(food_pickup_envelope(sid, 1, 4))
+            .expect("pickup 1");
+
+        state
+            .apply_event(food_drop_envelope(sid, 0, 1.0, 1.0, 5))
             .expect("initial food drop should be accepted");
 
         state.register_api_demand().await;
@@ -901,21 +941,7 @@ mod tests {
         wait_for_analytics_occupied_cells(&state, 1).await;
 
         state
-            .apply_event(EventEnvelope {
-                event_type: "food_drop".into(),
-                sim_id: "sim-cadence".into(),
-                seq: 3,
-                timestamp_ms: 0,
-                payload: EventPayload::FoodDrop(crate::protocol::FoodDropPayload {
-                    ant_id: Some("ant-1".into()),
-                    food_id: "food-2".into(),
-                    x: 2.0,
-                    y: 2.0,
-                    direction_x: Some(0.0),
-                    direction_y: Some(1.0),
-                    frame: Some(3),
-                }),
-            })
+            .apply_event(food_drop_envelope(sid, 1, 2.0, 2.0, 6))
             .expect("second food drop should be accepted");
 
         tokio::time::sleep(Duration::from_millis(20)).await;
@@ -968,56 +994,32 @@ mod tests {
     #[tokio::test]
     async fn duplicate_food_drop_does_not_inflate_live_loose_food_count() {
         let state = AppState::new();
+        let sid = "sim-dup";
         state
             .apply_event(EventEnvelope {
                 event_type: "sim_hello".into(),
-                sim_id: "sim-dup".into(),
+                sim_id: sid.into(),
                 seq: 1,
                 timestamp_ms: 0,
                 payload: EventPayload::SimHello(HelloPayload {
-                    sim_name: "sim-dup".into(),
+                    sim_name: sid.into(),
                     source: "test".into(),
                     session_started_ms: 0,
                     world_width: 1280.0,
                     world_height: 720.0,
                     ant_count: 1,
-                    food_count: 0,
+                    food_count: 1,
                 }),
             })
             .expect("sim_hello");
         state
-            .apply_event(EventEnvelope {
-                event_type: "food_drop".into(),
-                sim_id: "sim-dup".into(),
-                seq: 2,
-                timestamp_ms: 0,
-                payload: EventPayload::FoodDrop(crate::protocol::FoodDropPayload {
-                    ant_id: Some("ant-1".into()),
-                    food_id: "food-1".into(),
-                    x: 10.0,
-                    y: 20.0,
-                    direction_x: Some(0.0),
-                    direction_y: Some(1.0),
-                    frame: Some(1),
-                }),
-            })
+            .apply_event(sim_food_snapshot_envelope(sid, 1))
+            .expect("snapshot");
+        state
+            .apply_event(food_drop_envelope(sid, 0, 10.0, 20.0, 3))
             .expect("first food_drop");
         state
-            .apply_event(EventEnvelope {
-                event_type: "food_drop".into(),
-                sim_id: "sim-dup".into(),
-                seq: 3,
-                timestamp_ms: 0,
-                payload: EventPayload::FoodDrop(crate::protocol::FoodDropPayload {
-                    ant_id: Some("ant-1".into()),
-                    food_id: "food-1".into(),
-                    x: 30.0,
-                    y: 40.0,
-                    direction_x: Some(0.0),
-                    direction_y: Some(1.0),
-                    frame: Some(2),
-                }),
-            })
+            .apply_event(food_drop_envelope(sid, 0, 30.0, 40.0, 4))
             .expect("duplicate food_drop");
 
         let snapshot = current_snapshot_json(&state);
@@ -1034,44 +1036,31 @@ mod tests {
     #[tokio::test]
     async fn pickup_of_missing_food_does_not_deflate_live_loose_food_count() {
         let state = AppState::new();
+        let sid = "sim-miss";
         state
             .apply_event(EventEnvelope {
                 event_type: "sim_hello".into(),
-                sim_id: "sim-miss".into(),
+                sim_id: sid.into(),
                 seq: 1,
                 timestamp_ms: 0,
                 payload: EventPayload::SimHello(HelloPayload {
-                    sim_name: "sim-miss".into(),
+                    sim_name: sid.into(),
                     source: "test".into(),
                     session_started_ms: 0,
                     world_width: 1280.0,
                     world_height: 720.0,
                     ant_count: 1,
-                    food_count: 0,
+                    food_count: 1,
                 }),
             })
             .expect("sim_hello");
         state
-            .apply_event(EventEnvelope {
-                event_type: "food_drop".into(),
-                sim_id: "sim-miss".into(),
-                seq: 2,
-                timestamp_ms: 0,
-                payload: EventPayload::FoodDrop(crate::protocol::FoodDropPayload {
-                    ant_id: Some("ant-1".into()),
-                    food_id: "food-1".into(),
-                    x: 10.0,
-                    y: 20.0,
-                    direction_x: Some(0.0),
-                    direction_y: Some(1.0),
-                    frame: Some(1),
-                }),
-            })
-            .expect("food_drop");
+            .apply_event(sim_food_snapshot_envelope(sid, 1))
+            .expect("snapshot");
         state
             .apply_event(EventEnvelope {
                 event_type: "food_pickup".into(),
-                sim_id: "sim-miss".into(),
+                sim_id: sid.into(),
                 seq: 3,
                 timestamp_ms: 0,
                 payload: EventPayload::FoodPickup(crate::protocol::FoodPickupPayload {

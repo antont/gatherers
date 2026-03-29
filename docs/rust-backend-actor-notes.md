@@ -9,7 +9,8 @@ The goal is not to argue that the current design is wrong. The goal is to clarif
 The Rust backend today is a hybrid:
 
 - ingest mutates authoritative shared state in `Store`
-- `Store` uses sharded `RwLock<HashMap<...>>` state for concurrent writes by sim
+- `Store` uses sharded `RwLock<HashMap<String, SimState>>` for concurrent writes by sim
+- each `SimState` owns a stable `Vec<FoodSlot>` indexed by stringified slot ID, eliminating per-event HashMap allocation for food tracking
 - app state keeps separately published live and analytics snapshots
 - one demand-driven refresh worker serializes heavy analytics recomputation
 - dashboard updates are broadcast through one shared fanout channel
@@ -142,9 +143,7 @@ Costs:
 - iteration semantics and snapshot consistency become more subtle
 - it adds a dependency and a different mental model without clearly solving the publish/snapshot question
 
-For this backend, this looks possible but not especially compelling as the next move.
-
-It helps container concurrency, but the core architecture problem here is not really “we need a better map.” It is “we want readers to see a coherent view without interfering with the write path.”
+For this backend, this is now less compelling than before, because the per-sim food storage has already moved from `HashMap<String, FoodPosition>` to a stable `Vec<FoodSlot>`. The remaining HashMap is only the sim-level index (`String -> SimState`), which changes rarely (only on new sim connections). The hot-path mutation is now direct slot writes within a stable array, which is already well-suited to the sharded RwLock model.
 
 ## Option 4: Publish Immutable Snapshots For Readers
 
@@ -244,7 +243,8 @@ Why not full actor ownership of all state?
 
 Why not jump to a concurrent-map crate first?
 
-- it changes the container, but not the publication model
+- the per-sim food storage is already a stable slot array, not a HashMap
+- the remaining sim-level HashMap changes rarely (only on new connections)
 - the hard part here is coherent publication of views, not only concurrent insertion/removal
 
 Why not just stay exactly as-is forever?
