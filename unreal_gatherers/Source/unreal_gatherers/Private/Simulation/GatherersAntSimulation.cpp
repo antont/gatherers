@@ -79,3 +79,8 @@ float ComputeRemainingPickupCooldown(
 {
 	return FMath::Max(0.0f, CurrentCooldownSeconds - FMath::Max(0.0f, DeltaSeconds));
 }
+
+FVector ComputeCarriedFoodRelativeLocation(float CarriedFoodHeight)
+{
+	return FVector(0.0f, 0.0f, CarriedFoodHeight);
+}

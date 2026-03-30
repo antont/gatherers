@@ -30,3 +30,5 @@ UNREAL_GATHERERS_API int32 FindClosestLooseFoodTargetIndex(
 UNREAL_GATHERERS_API float ComputeRemainingPickupCooldown(
 	float CurrentCooldownSeconds,
 	float DeltaSeconds);
+
+UNREAL_GATHERERS_API FVector ComputeCarriedFoodRelativeLocation(float CarriedFoodHeight);
