@@ -46,3 +46,29 @@ FVector ComputeAntRetargetDirection(
 	const float RetargetAngle = CurrentAngle + PI + RetargetJitterRadians;
 	return FVector(FMath::Cos(RetargetAngle), FMath::Sin(RetargetAngle), 0.0f).GetSafeNormal();
 }
+
+int32 FindClosestLooseFoodTargetIndex(
+	const FVector& AntLocation,
+	const TArray<FGatherersFoodTarget>& FoodTargets)
+{
+	int32 ClosestLooseFoodIndex = INDEX_NONE;
+	float ClosestDistanceSquared = TNumericLimits<float>::Max();
+
+	for (int32 FoodIndex = 0; FoodIndex < FoodTargets.Num(); ++FoodIndex)
+	{
+		const FGatherersFoodTarget& FoodTarget = FoodTargets[FoodIndex];
+		if (!FoodTarget.bIsLoose)
+		{
+			continue;
+		}
+
+		const float DistanceSquared = FVector::DistSquared(AntLocation, FoodTarget.Location);
+		if (DistanceSquared < ClosestDistanceSquared)
+		{
+			ClosestDistanceSquared = DistanceSquared;
+			ClosestLooseFoodIndex = FoodIndex;
+		}
+	}
+
+	return ClosestLooseFoodIndex;
+}
