@@ -31,6 +31,63 @@ DEFINE_LATENT_AUTOMATION_COMMAND_ONE_PARAMETER(
 	FAutomationTestBase*,
 	Test);
 
+class FGatherersWaitForCarryMovementCommand : public IAutomationLatentCommand
+{
+public:
+	FGatherersWaitForCarryMovementCommand(FAutomationTestBase* InTest, double InStartTimeSeconds, double InTimeoutSeconds)
+		: Test(InTest),
+		  StartTimeSeconds(InStartTimeSeconds),
+		  TimeoutSeconds(InTimeoutSeconds)
+	{
+	}
+
+	virtual bool Update() override
+	{
+		UWorld* World = GEditor ? GEditor->PlayWorld : nullptr;
+		Test->TestNotNull(TEXT("simulation world should exist during carry movement"), World);
+		if (World == nullptr)
+		{
+			return true;
+		}
+
+		const GatherersWorldAssertions::FObservedWorldState WorldState = GatherersWorldAssertions::Observe(World);
+		AAnt* Ant = WorldState.GetSingleAnt();
+		AFood* Food = WorldState.GetSingleFood();
+		const bool bPickedUpFood = Ant != nullptr && Food != nullptr && Food->GetAttachParentActor() == Ant;
+
+		if (bPickedUpFood && !PickupLocation.IsSet())
+		{
+			PickupLocation = Ant->GetActorLocation();
+			return false;
+		}
+
+		if (bPickedUpFood && PickupLocation.IsSet())
+		{
+			const bool bAntMovedWhileCarrying =
+				!Ant->GetActorLocation().Equals(PickupLocation.GetValue(), KINDA_SMALL_NUMBER);
+			if (bAntMovedWhileCarrying)
+			{
+				Test->TestTrue(TEXT("ant keeps moving after pickup while carrying food"), true);
+				return true;
+			}
+		}
+
+		if (FPlatformTime::Seconds() - StartTimeSeconds < TimeoutSeconds)
+		{
+			return false;
+		}
+
+		Test->TestTrue(TEXT("ant keeps moving after pickup while carrying food"), false);
+		return true;
+	}
+
+private:
+	FAutomationTestBase* Test;
+	double StartTimeSeconds;
+	double TimeoutSeconds;
+	TOptional<FVector> PickupLocation;
+};
+
 bool FGatherersWaitForSimulationPickupCommand::Update()
 {
 	return GatherersWorldAssertions::PollForPickupState(
@@ -108,5 +165,26 @@ bool FGatherersAntPickupActorRerunAutomationTest::RunTest(const FString& Paramet
 	ADD_LATENT_AUTOMATION_COMMAND(FEndPlayMapCommand());
 	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForSimulationPIECleanupCommand(this, FPlatformTime::Seconds(), 5.0));
 	ADD_LATENT_AUTOMATION_COMMAND(FGatherersQueueSecondSimulationRunCommand(this));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FGatherersAntCarryMovementAutomationTest,
+	"default.unreal_gatherers.Simulation.AntKeepsMovingAfterPickup",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FGatherersAntCarryMovementAutomationTest::RunTest(const FString& Parameters)
+{
+	const bool bOpenedMap = AutomationOpenMap(TEXT("/Game/SimBlank/Levels/SimBlank"));
+	TestTrue(TEXT("should open SimBlank map"), bOpenedMap);
+
+	if (!bOpenedMap)
+	{
+		return false;
+	}
+
+	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForCarryMovementCommand(this, FPlatformTime::Seconds(), 5.0));
+	ADD_LATENT_AUTOMATION_COMMAND(FEndPlayMapCommand());
+	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForSimulationPIECleanupCommand(this, FPlatformTime::Seconds(), 5.0));
 	return true;
 }
