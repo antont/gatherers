@@ -35,3 +35,19 @@ bool FGatherersAntPickupRadiusAutomationTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("ant picks up food when it is within pickup radius"), bShouldPickup);
 	return true;
 }
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FGatherersAntRetargetDirectionAutomationTest,
+	"default.unreal_gatherers.Simulation.AntRetargetDirectionReversesHeadingOnPickup",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FGatherersAntRetargetDirectionAutomationTest::RunTest(const FString& Parameters)
+{
+	const FVector CurrentDirection(1.0f, 0.0f, 0.0f);
+	const FVector RetargetedDirection = ComputeAntRetargetDirection(CurrentDirection, 0.0f);
+
+	TestTrue(
+		TEXT("ant reverses heading when retarget jitter is zero"),
+		RetargetedDirection.Equals(FVector(-1.0f, 0.0f, 0.0f), KINDA_SMALL_NUMBER));
+	return true;
+}
