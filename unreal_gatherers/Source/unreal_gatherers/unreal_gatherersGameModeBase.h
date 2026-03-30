@@ -13,5 +13,7 @@ UCLASS()
 class UNREAL_GATHERERS_API Aunreal_gatherersGameModeBase : public AGameModeBase
 {
 	GENERATED_BODY()
-	
+
+public:
+	virtual void StartPlay() override;
 };
