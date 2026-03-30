@@ -51,3 +51,21 @@ bool FGatherersAntRetargetDirectionAutomationTest::RunTest(const FString& Parame
 		RetargetedDirection.Equals(FVector(-1.0f, 0.0f, 0.0f), KINDA_SMALL_NUMBER));
 	return true;
 }
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FGatherersClosestLooseFoodAutomationTest,
+	"default.unreal_gatherers.Simulation.AntTargetsNearestLooseFood",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FGatherersClosestLooseFoodAutomationTest::RunTest(const FString& Parameters)
+{
+	TArray<FGatherersFoodTarget> FoodTargets;
+	FoodTargets.Add({FVector(400.0f, 0.0f, 0.0f), true});
+	FoodTargets.Add({FVector(100.0f, 0.0f, 0.0f), false});
+	FoodTargets.Add({FVector(200.0f, 0.0f, 0.0f), true});
+
+	const int32 ClosestLooseFoodIndex = FindClosestLooseFoodTargetIndex(FVector::ZeroVector, FoodTargets);
+
+	TestEqual(TEXT("ant picks the nearest loose food and ignores carried food"), ClosestLooseFoodIndex, 2);
+	return true;
+}
