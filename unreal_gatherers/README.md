@@ -57,6 +57,16 @@ Useful targeted reruns:
 -ExecCmds="Automation RunTest unreal_gatherers.Spawning.StartupSmokeSpawnsOneAntAndOneFood;Quit"
 ```
 
+## Refresh editor indexing
+
+To regenerate Unreal's clang compilation database for Cursor/clangd:
+
+```sh
+./scripts/generate_unreal_clangdb.sh
+```
+
+This writes `unreal_gatherers/compile_commands.json`, which is ignored from git because it contains machine-local paths. The repo includes workspace settings plus `unreal_gatherers/.clangd` so Cursor should use that database for navigation and diagnostics once it exists. If the editor does not refresh automatically, reload the Cursor window after running the script.
+
 ## Run standalone game mode
 
 This launches the project outside the editor UI while still using the editor executable:

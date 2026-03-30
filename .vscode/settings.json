@@ -1,0 +1,9 @@
+{
+  "C_Cpp.default.compileCommands": "${workspaceFolder}/unreal_gatherers/compile_commands.json",
+  "files.associations": {
+    "*.generated.h": "cpp"
+  },
+  "clangd.arguments": [
+    "--compile-commands-dir=${workspaceFolder}/unreal_gatherers"
+  ]
+}

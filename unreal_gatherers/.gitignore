@@ -25,6 +25,8 @@ Saved/*
 Intermediate/*
 Plugins/**/Intermediate/*
 DerivedDataCache/*
+compile_commands.json
+.cache/
 
 *.o
 *.obj
