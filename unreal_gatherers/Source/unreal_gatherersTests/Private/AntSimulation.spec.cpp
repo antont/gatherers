@@ -69,3 +69,16 @@ bool FGatherersClosestLooseFoodAutomationTest::RunTest(const FString& Parameters
 	TestEqual(TEXT("ant picks the nearest loose food and ignores carried food"), ClosestLooseFoodIndex, 2);
 	return true;
 }
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FGatherersPickupCooldownAutomationTest,
+	"default.unreal_gatherers.Simulation.AntPickupCooldownCountsDownAndClampsToZero",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FGatherersPickupCooldownAutomationTest::RunTest(const FString& Parameters)
+{
+	const float RemainingCooldown = ComputeRemainingPickupCooldown(0.2f, 0.5f);
+
+	TestEqual(TEXT("pickup cooldown clamps to zero instead of going negative"), RemainingCooldown, 0.0f);
+	return true;
+}
