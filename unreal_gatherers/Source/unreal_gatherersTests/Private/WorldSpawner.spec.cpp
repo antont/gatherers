@@ -23,7 +23,7 @@ TArray<ActorType*> CollectActors(UWorld* World)
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FGatherersWorldSpawnerAutomationTest,
-	"default.unreal_gatherers.Spawning.WorldSpawnerCreatesAntAndFoodActors",
+	"default.unreal_gatherers.Spawning.WorldSpawnerCreatesAntAndTwoFoodActors",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FGatherersWorldSpawnerAutomationTest::RunTest(const FString& Parameters)
@@ -50,9 +50,9 @@ bool FGatherersWorldSpawnerAutomationTest::RunTest(const FString& Parameters)
 	const TArray<AFood*> FoodsInWorld = CollectActors<AFood>(World);
 
 	TestEqual(TEXT("spawned ant count"), Result.Ants.Num(), 1);
-	TestEqual(TEXT("spawned food count"), Result.Foods.Num(), 1);
+	TestEqual(TEXT("spawned food count"), Result.Foods.Num(), 2);
 	TestEqual(TEXT("editor world ant count increases by one"), AntsInWorld.Num(), AntsBeforeSpawn.Num() + 1);
-	TestEqual(TEXT("editor world food count increases by one"), FoodsInWorld.Num(), FoodsBeforeSpawn.Num() + 1);
+	TestEqual(TEXT("editor world food count increases by two"), FoodsInWorld.Num(), FoodsBeforeSpawn.Num() + 2);
 
 	if (Result.Ants.Num() == 1)
 	{
@@ -65,15 +65,22 @@ bool FGatherersWorldSpawnerAutomationTest::RunTest(const FString& Parameters)
 			Result.Ants[0]->GetActorLocation().Equals(Plan.AntSpawns[0].GetLocation(), PositionTolerance));
 	}
 
-	if (Result.Foods.Num() == 1)
+	if (Result.Foods.Num() == 2)
 	{
-		TestTrue(TEXT("spawned food type"), Result.Foods[0]->IsA<AFood>());
-		TestFalse(TEXT("returned food did not exist before spawn"), FoodsBeforeSpawn.Contains(Result.Foods[0]));
-		TestTrue(TEXT("returned food exists in editor world"), FoodsInWorld.Contains(Result.Foods[0]));
-		TestTrue(TEXT("spawned food world matches editor world"), Result.Foods[0]->GetWorld() == World);
+		TestTrue(TEXT("spawned first food type"), Result.Foods[0]->IsA<AFood>());
+		TestTrue(TEXT("spawned second food type"), Result.Foods[1]->IsA<AFood>());
+		TestFalse(TEXT("returned first food did not exist before spawn"), FoodsBeforeSpawn.Contains(Result.Foods[0]));
+		TestFalse(TEXT("returned second food did not exist before spawn"), FoodsBeforeSpawn.Contains(Result.Foods[1]));
+		TestTrue(TEXT("returned first food exists in editor world"), FoodsInWorld.Contains(Result.Foods[0]));
+		TestTrue(TEXT("returned second food exists in editor world"), FoodsInWorld.Contains(Result.Foods[1]));
+		TestTrue(TEXT("first spawned food world matches editor world"), Result.Foods[0]->GetWorld() == World);
+		TestTrue(TEXT("second spawned food world matches editor world"), Result.Foods[1]->GetWorld() == World);
 		TestTrue(
-			TEXT("spawned food location matches spawn plan"),
+			TEXT("first spawned food location matches spawn plan"),
 			Result.Foods[0]->GetActorLocation().Equals(Plan.FoodSpawns[0].GetLocation(), PositionTolerance));
+		TestTrue(
+			TEXT("second spawned food location matches spawn plan"),
+			Result.Foods[1]->GetActorLocation().Equals(Plan.FoodSpawns[1].GetLocation(), PositionTolerance));
 	}
 
 	for (AAnt* Ant : Result.Ants)
