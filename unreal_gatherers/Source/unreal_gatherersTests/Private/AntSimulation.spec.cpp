@@ -82,3 +82,18 @@ bool FGatherersPickupCooldownAutomationTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("pickup cooldown clamps to zero instead of going negative"), RemainingCooldown, 0.0f);
 	return true;
 }
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FGatherersCarriedFoodOffsetAutomationTest,
+	"default.unreal_gatherers.Simulation.CarriedFoodOffsetMatchesConfiguredHeight",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FGatherersCarriedFoodOffsetAutomationTest::RunTest(const FString& Parameters)
+{
+	const FVector CarriedFoodOffset = ComputeCarriedFoodRelativeLocation(20.0f);
+
+	TestTrue(
+		TEXT("carried food sits directly above the ant at the configured height"),
+		CarriedFoodOffset.Equals(FVector(0.0f, 0.0f, 20.0f), KINDA_SMALL_NUMBER));
+	return true;
+}
