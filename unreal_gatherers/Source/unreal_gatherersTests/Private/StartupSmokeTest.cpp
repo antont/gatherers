@@ -39,7 +39,12 @@ bool FGatherersWaitForStartupActorsCommand::Update()
 		FoodsInWorld.Add(*It);
 	}
 
-	if (AntsInWorld.Num() != 1 || FoodsInWorld.Num() != 1)
+	const bool bHasExpectedCounts = AntsInWorld.Num() == 1 && FoodsInWorld.Num() == 1;
+	const bool bAntMoved = bHasExpectedCounts
+		&& !AntsInWorld[0]->GetActorLocation().Equals(Plan.AntSpawns[0].GetLocation(), PositionTolerance);
+	const bool bFoodAttachedToAnt = bHasExpectedCounts && FoodsInWorld[0]->GetAttachParentActor() == AntsInWorld[0];
+
+	if (!bHasExpectedCounts || !bAntMoved || !bFoodAttachedToAnt)
 	{
 		if (FPlatformTime::Seconds() - StartTimeSeconds < TimeoutSeconds)
 		{
@@ -48,17 +53,20 @@ bool FGatherersWaitForStartupActorsCommand::Update()
 
 		Test->TestEqual(TEXT("startup ant count"), AntsInWorld.Num(), 1);
 		Test->TestEqual(TEXT("startup food count"), FoodsInWorld.Num(), 1);
+		Test->TestTrue(TEXT("startup ant moves from its spawn point"), bAntMoved);
+		Test->TestTrue(TEXT("startup food attaches to the ant"), bFoodAttachedToAnt);
 		return true;
 	}
 
 	Test->TestTrue(TEXT("startup ant world matches PIE world"), AntsInWorld[0]->GetWorld() == World);
-	Test->TestTrue(
-		TEXT("startup ant location matches spawn plan"),
-		AntsInWorld[0]->GetActorLocation().Equals(Plan.AntSpawns[0].GetLocation(), PositionTolerance));
 	Test->TestTrue(TEXT("startup food world matches PIE world"), FoodsInWorld[0]->GetWorld() == World);
 	Test->TestTrue(
-		TEXT("startup food location matches spawn plan"),
-		FoodsInWorld[0]->GetActorLocation().Equals(Plan.FoodSpawns[0].GetLocation(), PositionTolerance));
+		TEXT("startup ant moves away from its spawn plan position"),
+		!AntsInWorld[0]->GetActorLocation().Equals(Plan.AntSpawns[0].GetLocation(), PositionTolerance));
+	Test->TestTrue(TEXT("startup food is attached to the ant"), FoodsInWorld[0]->GetAttachParentActor() == AntsInWorld[0]);
+	Test->TestTrue(
+		TEXT("startup food no longer remains at its spawn plan position"),
+		!FoodsInWorld[0]->GetActorLocation().Equals(Plan.FoodSpawns[0].GetLocation(), PositionTolerance));
 
 	return true;
 }
