@@ -31,3 +31,18 @@ bool ShouldAntPickUpFood(
 	const float EffectivePickupRadius = FMath::Max(0.0f, PickupRadius);
 	return FVector::DistSquared(AntLocation, FoodLocation) <= FMath::Square(EffectivePickupRadius);
 }
+
+FVector ComputeAntRetargetDirection(
+	const FVector& CurrentDirection,
+	float RetargetJitterRadians)
+{
+	const FVector SafeDirection = CurrentDirection.GetSafeNormal();
+	if (SafeDirection.IsNearlyZero())
+	{
+		return FVector::ZeroVector;
+	}
+
+	const float CurrentAngle = FMath::Atan2(SafeDirection.Y, SafeDirection.X);
+	const float RetargetAngle = CurrentAngle + PI + RetargetJitterRadians;
+	return FVector(FMath::Cos(RetargetAngle), FMath::Sin(RetargetAngle), 0.0f).GetSafeNormal();
+}
