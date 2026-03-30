@@ -88,6 +88,70 @@ private:
 	TOptional<FVector> PickupLocation;
 };
 
+class FGatherersWaitForDropStateCommand : public IAutomationLatentCommand
+{
+public:
+	FGatherersWaitForDropStateCommand(FAutomationTestBase* InTest, double InStartTimeSeconds, double InTimeoutSeconds)
+		: Test(InTest),
+		  StartTimeSeconds(InStartTimeSeconds),
+		  TimeoutSeconds(InTimeoutSeconds)
+	{
+	}
+
+	virtual bool Update() override
+	{
+		UWorld* World = GEditor ? GEditor->PlayWorld : nullptr;
+		Test->TestNotNull(TEXT("simulation world should exist during drop verification"), World);
+		if (World == nullptr)
+		{
+			return true;
+		}
+
+		const FGatherersSpawnPlan Plan = BuildInitialGatherersSpawnPlan();
+		const GatherersWorldAssertions::FObservedWorldState WorldState = GatherersWorldAssertions::Observe(World);
+		const bool bHasOneAntAndTwoFoods = WorldState.Ants.Num() == 1 && WorldState.Foods.Num() == 2;
+		bool bAnyFoodAttached = false;
+		bool bDroppedFoodLeftInitialForwardSpawn = false;
+
+		for (AFood* Food : WorldState.Foods)
+		{
+			if (Food == nullptr)
+			{
+				continue;
+			}
+
+			bAnyFoodAttached |= Food->GetAttachParentActor() != nullptr;
+			bDroppedFoodLeftInitialForwardSpawn |=
+				!Food->GetActorLocation().Equals(Plan.FoodSpawns[0].GetLocation(), KINDA_SMALL_NUMBER);
+		}
+
+		if (bAnyFoodAttached)
+		{
+			bSawAttachedFood = true;
+		}
+
+		if (bHasOneAntAndTwoFoods && bSawAttachedFood && !bAnyFoodAttached && bDroppedFoodLeftInitialForwardSpawn)
+		{
+			Test->TestTrue(TEXT("carried food becomes loose again after the return path"), true);
+			return true;
+		}
+
+		if (FPlatformTime::Seconds() - StartTimeSeconds < TimeoutSeconds)
+		{
+			return false;
+		}
+
+		Test->TestTrue(TEXT("carried food becomes loose again after the return path"), false);
+		return true;
+	}
+
+private:
+	FAutomationTestBase* Test;
+	double StartTimeSeconds;
+	double TimeoutSeconds;
+	bool bSawAttachedFood = false;
+};
+
 bool FGatherersWaitForSimulationPickupCommand::Update()
 {
 	return GatherersWorldAssertions::PollForPickupState(
@@ -184,6 +248,27 @@ bool FGatherersAntCarryMovementAutomationTest::RunTest(const FString& Parameters
 	}
 
 	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForCarryMovementCommand(this, FPlatformTime::Seconds(), 5.0));
+	ADD_LATENT_AUTOMATION_COMMAND(FEndPlayMapCommand());
+	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForSimulationPIECleanupCommand(this, FPlatformTime::Seconds(), 5.0));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FGatherersAntDropFoodAutomationTest,
+	"default.unreal_gatherers.Simulation.AntDropsFoodBackIntoWorld",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FGatherersAntDropFoodAutomationTest::RunTest(const FString& Parameters)
+{
+	const bool bOpenedMap = AutomationOpenMap(TEXT("/Game/SimBlank/Levels/SimBlank"));
+	TestTrue(TEXT("should open SimBlank map"), bOpenedMap);
+
+	if (!bOpenedMap)
+	{
+		return false;
+	}
+
+	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForDropStateCommand(this, FPlatformTime::Seconds(), 8.0));
 	ADD_LATENT_AUTOMATION_COMMAND(FEndPlayMapCommand());
 	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForSimulationPIECleanupCommand(this, FPlatformTime::Seconds(), 5.0));
 	return true;
