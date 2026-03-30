@@ -69,14 +69,14 @@ public:
 		if (WorldState.HasSingleAntAndTwoFoods() && AttachedFood != nullptr
 			&& AttachedFood->GetAttachParentActor() == WorldState.GetSingleAnt())
 		{
-			GatherersWorldAssertions::AssertPickupState(*Test, WorldState, Plan, TEXT("visual"));
+			GatherersWorldAssertions::AssertFirstDropState(*Test, WorldState, Plan, TEXT("visual"));
 			return true;
 		}
 
 		const double NowSeconds = FPlatformTime::Seconds();
 		if (NowSeconds - StartTimeSeconds >= VisualTimeoutSeconds)
 		{
-			GatherersWorldAssertions::AssertPickupState(*Test, WorldState, Plan, TEXT("visual"));
+			GatherersWorldAssertions::AssertFirstDropState(*Test, WorldState, Plan, TEXT("visual"));
 			return true;
 		}
 
