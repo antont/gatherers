@@ -14,7 +14,7 @@ namespace
 {
 constexpr TCHAR SimBlankMapPackage[] = TEXT("/Game/SimBlank/Levels/SimBlank");
 constexpr double VisualStepSeconds = 0.1;
-constexpr double VisualTimeoutSeconds = 5.0;
+constexpr double VisualTimeoutSeconds = 8.0;
 
 bool LoadSimBlankIntoEditorWorld()
 {
@@ -65,9 +65,12 @@ public:
 		const FGatherersSpawnPlan Plan = BuildInitialGatherersSpawnPlan();
 		const GatherersWorldAssertions::FObservedWorldState WorldState = GatherersWorldAssertions::Observe(World);
 		AFood* AttachedFood = WorldState.GetFirstAttachedFood();
+		if (AttachedFood != nullptr)
+		{
+			bSawAttachedFood = true;
+		}
 
-		if (WorldState.HasSingleAntAndTwoFoods() && AttachedFood != nullptr
-			&& AttachedFood->GetAttachParentActor() == WorldState.GetSingleAnt())
+		if (WorldState.HasSingleAntAndTwoFoods() && bSawAttachedFood && AttachedFood == nullptr)
 		{
 			GatherersWorldAssertions::AssertFirstDropState(*Test, WorldState, Plan, TEXT("visual"));
 			return true;
@@ -98,12 +101,13 @@ private:
 	FAutomationTestBase* Test;
 	double StartTimeSeconds;
 	double LastStepTimeSeconds;
+	bool bSawAttachedFood = false;
 };
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FGatherersVisualPickupAutomationTest,
-	"manual.unreal_gatherers.Visual.AntPickupLeavesWorldForInspection",
+	"manual.unreal_gatherers.Visual.AntFirstDropLeavesWorldForInspection",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FGatherersVisualPickupAutomationTest::RunTest(const FString& Parameters)

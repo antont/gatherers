@@ -1,23 +1,21 @@
 # unreal_gatherers
 
-First-round Unreal 5.7 port scaffold for the `gatherers` simulation.
+Unreal 5.7 port of the `gatherers` simulation.
 
 ## Current scope
 
-This first TDD slice is intentionally narrow:
+Current implemented slice:
 
 - editor-only automation test module
-- deterministic spawn plan with one ant and one food
-- minimal `AAnt` and `AFood`
+- deterministic spawn plan with one ant and two foods
+- `AAnt`/`AFood` repeated gather loop
 - startup integration through `Aunreal_gatherersGameModeBase`
 - standalone `-game` launch into `SimBlank`
+- visual/manual editor inspection path
 
-Out of scope for this round:
+Still out of scope:
 
-- ant movement or AI
-- food pickup logic
 - backend or networking integration
-- visual polish
 - packaged build automation
 - Functional Testing plugin and Gauntlet
 
@@ -39,12 +37,12 @@ Recommended entrypoint:
 
 This builds `unreal_gatherersEditor` and runs the non-visual default `default.unreal_gatherers` automation namespace.
 
-Run the current spawning subset directly:
+Run a focused subset directly:
 
 ```sh
 "/Users/Shared/Epic Games/UE_5.7/Engine/Binaries/Mac/UnrealEditor.app/Contents/MacOS/UnrealEditor" \
   "/Users/tonialatalo/src/gatherers/unreal_gatherers/unreal_gatherers.uproject" \
-  -ExecCmds="Automation RunTest unreal_gatherers.Spawning;Quit" \
+  -ExecCmds="Automation RunTest default.unreal_gatherers.Spawning;Quit" \
   -unattended -nop4 -nosplash -NullRHI -stdout -FullStdOutLogOutput
 ```
 
@@ -52,23 +50,23 @@ Useful targeted reruns:
 
 ```sh
 -ExecCmds="Automation RunTest default.unreal_gatherers.Placeholder.LoadsTestModule;Quit"
--ExecCmds="Automation RunTest default.unreal_gatherers.Spawning.SpawnPlanDefinesOneAntAndOneFood;Quit"
--ExecCmds="Automation RunTest default.unreal_gatherers.Spawning.WorldSpawnerCreatesAntAndFoodActors;Quit"
+-ExecCmds="Automation RunTest default.unreal_gatherers.Spawning.SpawnPlanDefinesOneAntAndTwoFoods;Quit"
+-ExecCmds="Automation RunTest default.unreal_gatherers.Spawning.WorldSpawnerCreatesAntAndTwoFoodActors;Quit"
 -ExecCmds="Automation RunTest default.unreal_gatherers.Simulation.AntMovesAndPicksUpFoodInWorld;Quit"
--ExecCmds="Automation RunTest supplemental.unreal_gatherers.Spawning.StartupSmokeSpawnsOneAntAndOneFood;Quit"
+-ExecCmds="Automation RunTest default.unreal_gatherers.Simulation.AntDropsFoodBackIntoWorld;Quit"
+-ExecCmds="Automation RunTest default.unreal_gatherers.Simulation.AntDropsFoodTwiceInSameEditorSession;Quit"
+-ExecCmds="Automation RunTest supplemental.unreal_gatherers.Spawning.StartupSmokeSpawnsOneAntAndTwoFoods;Quit"
 ```
 
-## Run the visual pickup demo
+## Run the visual gather demo
 
 The visual/manual pickup path is intentionally separate from `./scripts/test_unreal.sh` so the default automation suite stays clean and rerunnable.
 
 Run this scenario from the editor automation UI under:
 
-```sh
-manual.unreal_gatherers.Visual.AntPickupLeavesWorldForInspection
-```
+`manual.unreal_gatherers.Visual.AntFirstDropLeavesWorldForInspection`
 
-That visual/manual test loads `SimBlank` into a clean editor world, frames the viewport around the spawn area, advances the ant toward the food over time, and leaves the final picked-up state behind for inspection.
+That visual/manual test loads `SimBlank` into a clean editor world, frames the viewport around the two-food layout, advances the ant through pickup and return, and leaves the first dropped-food state behind for inspection.
 
 ## Refresh editor indexing
 
@@ -95,4 +93,4 @@ The current startup path should load:
 - `/Game/SimBlank/Levels/SimBlank`
 - `unreal_gatherersGameModeBase`
 
-and spawn one ant actor plus one food actor.
+and spawn one ant actor plus two food actors.

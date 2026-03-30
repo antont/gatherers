@@ -45,4 +45,11 @@ void AssertPickupState(
 	const FGatherersSpawnPlan& Plan,
 	const FString& LabelPrefix,
 	float PositionTolerance = KINDA_SMALL_NUMBER);
+
+void AssertFirstDropState(
+	FAutomationTestBase& Test,
+	const FObservedWorldState& WorldState,
+	const FGatherersSpawnPlan& Plan,
+	const FString& LabelPrefix,
+	float PositionTolerance = KINDA_SMALL_NUMBER);
 }

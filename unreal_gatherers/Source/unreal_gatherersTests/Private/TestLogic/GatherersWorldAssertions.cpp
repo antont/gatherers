@@ -97,6 +97,44 @@ void AssertPickupState(
 		!AttachedFood->GetActorLocation().Equals(Plan.FoodSpawns[0].GetLocation(), PositionTolerance));
 }
 
+void AssertFirstDropState(
+	FAutomationTestBase& Test,
+	const FObservedWorldState& WorldState,
+	const FGatherersSpawnPlan& Plan,
+	const FString& LabelPrefix,
+	float PositionTolerance)
+{
+	const FString CountPrefix = LabelPrefix.IsEmpty() ? TEXT("") : LabelPrefix + TEXT(" ");
+	Test.TestEqual(*(CountPrefix + TEXT("ant count")), WorldState.Ants.Num(), 1);
+	Test.TestEqual(*(CountPrefix + TEXT("food count")), WorldState.Foods.Num(), 2);
+	Test.TestEqual(*(CountPrefix + TEXT("attached food count after first drop")), WorldState.CountAttachedFoods(), 0);
+
+	AAnt* Ant = WorldState.GetSingleAnt();
+	if (Ant == nullptr)
+	{
+		return;
+	}
+
+	bool bFoundDroppedFoodAwayFromForwardSpawn = false;
+	for (AFood* Food : WorldState.Foods)
+	{
+		if (Food == nullptr)
+		{
+			continue;
+		}
+
+		bFoundDroppedFoodAwayFromForwardSpawn |=
+			!Food->GetActorLocation().Equals(Plan.FoodSpawns[0].GetLocation(), PositionTolerance);
+	}
+
+	Test.TestTrue(
+		*(CountPrefix + TEXT("ant moved from its spawn point before the first drop")),
+		!Ant->GetActorLocation().Equals(Plan.AntSpawns[0].GetLocation(), PositionTolerance));
+	Test.TestTrue(
+		*(CountPrefix + TEXT("one loose food sits away from the original forward spawn after the first drop")),
+		bFoundDroppedFoodAwayFromForwardSpawn);
+}
+
 bool PollForPickupState(
 	FAutomationTestBase& Test,
 	UWorld* World,
