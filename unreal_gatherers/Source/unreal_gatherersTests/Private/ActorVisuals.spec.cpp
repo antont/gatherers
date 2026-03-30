@@ -36,9 +36,9 @@ bool FGatherersActorVisualsAutomationTest::RunTest(const FString& Parameters)
 
 	const FGatherersSpawnResult Result = SpawnGatherersActors(*World, BuildInitialGatherersSpawnPlan());
 	TestEqual(TEXT("spawned ant count"), Result.Ants.Num(), 1);
-	TestEqual(TEXT("spawned food count"), Result.Foods.Num(), 1);
+	TestEqual(TEXT("spawned food count"), Result.Foods.Num(), 2);
 
-	if (Result.Ants.Num() != 1 || Result.Foods.Num() != 1)
+	if (Result.Ants.Num() != 1 || Result.Foods.Num() != 2)
 	{
 		return false;
 	}

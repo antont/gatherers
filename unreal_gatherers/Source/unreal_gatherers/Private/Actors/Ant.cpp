@@ -14,6 +14,7 @@ namespace
 constexpr float AntMovementSpeed = 100.0f;
 constexpr float AntPickupRadius = 15.0f;
 constexpr float CarriedFoodHeight = 20.0f;
+constexpr float AntPickupCooldownSeconds = 0.5f;
 const FLinearColor AntColor(0.8f, 0.8f, 0.8f, 1.0f);
 const FVector AntVisualScale(0.2f, 0.2f, 0.2f);
 }
@@ -55,8 +56,23 @@ void AAnt::Tick(float DeltaSeconds)
 	Super::Tick(DeltaSeconds);
 
 	const FVector CurrentLocation = GetActorLocation();
+	PickupCooldownRemainingSeconds = ComputeRemainingPickupCooldown(PickupCooldownRemainingSeconds, DeltaSeconds);
 
 	if (IsCarryingFood())
+	{
+		SetActorLocation(CurrentLocation + MovementDirection.GetSafeNormal() * AntMovementSpeed * FMath::Max(0.0f, DeltaSeconds));
+
+		AFood* DropTargetFood = FindClosestLooseFood();
+		if (DropTargetFood != nullptr
+			&& ShouldAntPickUpFood(GetActorLocation(), DropTargetFood->GetActorLocation(), AntPickupRadius))
+		{
+			DropFood();
+		}
+
+		return;
+	}
+
+	if (PickupCooldownRemainingSeconds > 0.0f)
 	{
 		SetActorLocation(CurrentLocation + MovementDirection.GetSafeNormal() * AntMovementSpeed * FMath::Max(0.0f, DeltaSeconds));
 		return;
@@ -117,13 +133,25 @@ AFood* AAnt::FindClosestLooseFood() const
 
 bool AAnt::IsCarryingFood() const
 {
-	TArray<AActor*> AttachedActors;
-	GetAttachedActors(AttachedActors);
-	return AttachedActors.Num() > 0;
+	return CarriedFood != nullptr;
 }
 
 void AAnt::PickUpFood(AFood& Food)
 {
+	CarriedFood = &Food;
 	Food.AttachToComponent(GetRootComponent(), FAttachmentTransformRules::KeepWorldTransform);
 	Food.SetActorRelativeLocation(ComputeCarriedFoodRelativeLocation(CarriedFoodHeight));
+}
+
+void AAnt::DropFood()
+{
+	if (CarriedFood == nullptr)
+	{
+		return;
+	}
+
+	CarriedFood->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
+	CarriedFood = nullptr;
+	PickupCooldownRemainingSeconds = AntPickupCooldownSeconds;
+	MovementDirection = ComputeAntRetargetDirection(MovementDirection, 0.0f);
 }

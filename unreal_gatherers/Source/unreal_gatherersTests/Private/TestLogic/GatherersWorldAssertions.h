@@ -15,9 +15,10 @@ struct FObservedWorldState
 	TArray<AAnt*> Ants;
 	TArray<AFood*> Foods;
 
-	bool HasSingleAntAndFood() const;
+	bool HasSingleAntAndTwoFoods() const;
 	AAnt* GetSingleAnt() const;
-	AFood* GetSingleFood() const;
+	int32 CountAttachedFoods() const;
+	AFood* GetFirstAttachedFood() const;
 };
 
 FObservedWorldState Observe(UWorld* World);

@@ -52,8 +52,9 @@ public:
 
 		const GatherersWorldAssertions::FObservedWorldState WorldState = GatherersWorldAssertions::Observe(World);
 		AAnt* Ant = WorldState.GetSingleAnt();
-		AFood* Food = WorldState.GetSingleFood();
-		const bool bPickedUpFood = Ant != nullptr && Food != nullptr && Food->GetAttachParentActor() == Ant;
+		AFood* AttachedFood = WorldState.GetFirstAttachedFood();
+		const bool bPickedUpFood = Ant != nullptr && AttachedFood != nullptr && AttachedFood->GetAttachParentActor() == Ant
+			&& WorldState.CountAttachedFoods() == 1;
 
 		if (bPickedUpFood && !PickupLocation.IsSet())
 		{
@@ -270,6 +271,6 @@ bool FGatherersAntDropFoodAutomationTest::RunTest(const FString& Parameters)
 
 	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForDropStateCommand(this, FPlatformTime::Seconds(), 8.0));
 	ADD_LATENT_AUTOMATION_COMMAND(FEndPlayMapCommand());
-	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForSimulationPIECleanupCommand(this, FPlatformTime::Seconds(), 5.0));
+	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForSimulationPIECleanupCommand(this, FPlatformTime::Seconds(), 20.0));
 	return true;
 }

@@ -33,7 +33,10 @@ void FrameVisualPickupInViewport(const FGatherersSpawnPlan& Plan)
 
 	FBox FocusBounds(EForceInit::ForceInit);
 	FocusBounds += Plan.AntSpawns[0].GetLocation();
-	FocusBounds += Plan.FoodSpawns[0].GetLocation();
+	for (const FTransform& FoodSpawn : Plan.FoodSpawns)
+	{
+		FocusBounds += FoodSpawn.GetLocation();
+	}
 	FocusBounds = FocusBounds.ExpandBy(FVector(150.0f, 300.0f, 150.0f));
 
 	GCurrentLevelEditingViewportClient->FocusViewportOnBox(FocusBounds, true);
@@ -61,8 +64,10 @@ public:
 
 		const FGatherersSpawnPlan Plan = BuildInitialGatherersSpawnPlan();
 		const GatherersWorldAssertions::FObservedWorldState WorldState = GatherersWorldAssertions::Observe(World);
+		AFood* AttachedFood = WorldState.GetFirstAttachedFood();
 
-		if (WorldState.HasSingleAntAndFood() && WorldState.GetSingleFood()->GetAttachParentActor() == WorldState.GetSingleAnt())
+		if (WorldState.HasSingleAntAndTwoFoods() && AttachedFood != nullptr
+			&& AttachedFood->GetAttachParentActor() == WorldState.GetSingleAnt())
 		{
 			GatherersWorldAssertions::AssertPickupState(*Test, WorldState, Plan, TEXT("visual"));
 			return true;
@@ -122,9 +127,9 @@ bool FGatherersVisualPickupAutomationTest::RunTest(const FString& Parameters)
 	const FGatherersSpawnPlan Plan = BuildInitialGatherersSpawnPlan();
 	const FGatherersSpawnResult Result = SpawnGatherersActors(*World, Plan);
 	TestEqual(TEXT("visual spawned ant count"), Result.Ants.Num(), 1);
-	TestEqual(TEXT("visual spawned food count"), Result.Foods.Num(), 1);
+	TestEqual(TEXT("visual spawned food count"), Result.Foods.Num(), 2);
 
-	if (Result.Ants.Num() != 1 || Result.Foods.Num() != 1)
+	if (Result.Ants.Num() != 1 || Result.Foods.Num() != 2)
 	{
 		return false;
 	}

@@ -49,7 +49,7 @@ bool FGatherersWaitForStartupPIECleanupCommand::Update()
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FGatherersStartupSmokeAutomationTest,
-	"supplemental.unreal_gatherers.Spawning.StartupSmokeSpawnsOneAntAndOneFood",
+	"supplemental.unreal_gatherers.Spawning.StartupSmokeSpawnsOneAntAndTwoFoods",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FGatherersStartupSmokeAutomationTest::RunTest(const FString& Parameters)
