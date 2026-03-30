@@ -26,3 +26,7 @@ UNREAL_GATHERERS_API FVector ComputeAntRetargetDirection(
 UNREAL_GATHERERS_API int32 FindClosestLooseFoodTargetIndex(
 	const FVector& AntLocation,
 	const TArray<FGatherersFoodTarget>& FoodTargets);
+
+UNREAL_GATHERERS_API float ComputeRemainingPickupCooldown(
+	float CurrentCooldownSeconds,
+	float DeltaSeconds);

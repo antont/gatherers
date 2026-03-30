@@ -72,3 +72,10 @@ int32 FindClosestLooseFoodTargetIndex(
 
 	return ClosestLooseFoodIndex;
 }
+
+float ComputeRemainingPickupCooldown(
+	float CurrentCooldownSeconds,
+	float DeltaSeconds)
+{
+	return FMath::Max(0.0f, CurrentCooldownSeconds - FMath::Max(0.0f, DeltaSeconds));
+}
