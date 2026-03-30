@@ -31,6 +31,11 @@ DEFINE_LATENT_AUTOMATION_COMMAND_ONE_PARAMETER(
 	FAutomationTestBase*,
 	Test);
 
+DEFINE_LATENT_AUTOMATION_COMMAND_ONE_PARAMETER(
+	FGatherersQueueSecondDropSimulationRunCommand,
+	FAutomationTestBase*,
+	Test);
+
 class FGatherersWaitForCarryMovementCommand : public IAutomationLatentCommand
 {
 public:
@@ -190,6 +195,22 @@ bool FGatherersQueueSecondSimulationRunCommand::Update()
 	return true;
 }
 
+bool FGatherersQueueSecondDropSimulationRunCommand::Update()
+{
+	const bool bOpenedMap = AutomationOpenMap(TEXT("/Game/SimBlank/Levels/SimBlank"));
+	Test->TestTrue(TEXT("should reopen SimBlank map for second drop simulation run"), bOpenedMap);
+
+	if (!bOpenedMap)
+	{
+		return true;
+	}
+
+	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForDropStateCommand(Test, FPlatformTime::Seconds(), 8.0));
+	ADD_LATENT_AUTOMATION_COMMAND(FEndPlayMapCommand());
+	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForSimulationPIECleanupCommand(Test, FPlatformTime::Seconds(), 5.0));
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FGatherersAntPickupActorAutomationTest,
 	"default.unreal_gatherers.Simulation.AntMovesAndPicksUpFoodInWorld",
@@ -272,5 +293,27 @@ bool FGatherersAntDropFoodAutomationTest::RunTest(const FString& Parameters)
 	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForDropStateCommand(this, FPlatformTime::Seconds(), 8.0));
 	ADD_LATENT_AUTOMATION_COMMAND(FEndPlayMapCommand());
 	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForSimulationPIECleanupCommand(this, FPlatformTime::Seconds(), 20.0));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FGatherersAntDropFoodRerunAutomationTest,
+	"default.unreal_gatherers.Simulation.AntDropsFoodTwiceInSameEditorSession",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FGatherersAntDropFoodRerunAutomationTest::RunTest(const FString& Parameters)
+{
+	const bool bOpenedMap = AutomationOpenMap(TEXT("/Game/SimBlank/Levels/SimBlank"));
+	TestTrue(TEXT("should open SimBlank map"), bOpenedMap);
+
+	if (!bOpenedMap)
+	{
+		return false;
+	}
+
+	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForDropStateCommand(this, FPlatformTime::Seconds(), 8.0));
+	ADD_LATENT_AUTOMATION_COMMAND(FEndPlayMapCommand());
+	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForSimulationPIECleanupCommand(this, FPlatformTime::Seconds(), 5.0));
+	ADD_LATENT_AUTOMATION_COMMAND(FGatherersQueueSecondDropSimulationRunCommand(this));
 	return true;
 }
