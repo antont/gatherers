@@ -17,15 +17,6 @@ DEFINE_LATENT_AUTOMATION_COMMAND_THREE_PARAMETER(
 	double,
 	TimeoutSeconds);
 
-DEFINE_LATENT_AUTOMATION_COMMAND_THREE_PARAMETER(
-	FGatherersWaitForSimulationPIECleanupCommand,
-	FAutomationTestBase*,
-	Test,
-	double,
-	StartTimeSeconds,
-	double,
-	TimeoutSeconds);
-
 DEFINE_LATENT_AUTOMATION_COMMAND_ONE_PARAMETER(
 	FGatherersQueueSecondSimulationRunCommand,
 	FAutomationTestBase*,
@@ -35,6 +26,36 @@ DEFINE_LATENT_AUTOMATION_COMMAND_ONE_PARAMETER(
 	FGatherersQueueSecondDropSimulationRunCommand,
 	FAutomationTestBase*,
 	Test);
+
+class FGatherersWaitForSimulationPIECleanupCommand : public IAutomationLatentCommand
+{
+public:
+	FGatherersWaitForSimulationPIECleanupCommand(FAutomationTestBase* InTest, double InTimeoutSeconds)
+		: Test(InTest),
+		  TimeoutSeconds(InTimeoutSeconds)
+	{
+	}
+
+	virtual bool Update() override
+	{
+		if (!StartTimeSeconds.IsSet())
+		{
+			StartTimeSeconds = FPlatformTime::Seconds();
+		}
+
+		return GatherersWorldAssertions::PollForPIEToEnd(
+			*Test,
+			TEXT("/Game/SimBlank/Levels/SimBlank"),
+			StartTimeSeconds.GetValue(),
+			TimeoutSeconds,
+			TEXT("simulation"));
+	}
+
+private:
+	FAutomationTestBase* Test;
+	double TimeoutSeconds;
+	TOptional<double> StartTimeSeconds;
+};
 
 class FGatherersWaitForCarryMovementCommand : public IAutomationLatentCommand
 {
@@ -169,16 +190,6 @@ bool FGatherersWaitForSimulationPickupCommand::Update()
 		TEXT("simulation"));
 }
 
-bool FGatherersWaitForSimulationPIECleanupCommand::Update()
-{
-	return GatherersWorldAssertions::PollForPIEToEnd(
-		*Test,
-		TEXT("/Game/SimBlank/Levels/SimBlank"),
-		StartTimeSeconds,
-		TimeoutSeconds,
-		TEXT("simulation"));
-}
-
 bool FGatherersQueueSecondSimulationRunCommand::Update()
 {
 	const bool bOpenedMap = AutomationOpenMap(TEXT("/Game/SimBlank/Levels/SimBlank"));
@@ -191,7 +202,7 @@ bool FGatherersQueueSecondSimulationRunCommand::Update()
 
 	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForSimulationPickupCommand(Test, FPlatformTime::Seconds(), 5.0));
 	ADD_LATENT_AUTOMATION_COMMAND(FEndPlayMapCommand());
-	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForSimulationPIECleanupCommand(Test, FPlatformTime::Seconds(), 5.0));
+	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForSimulationPIECleanupCommand(Test, 5.0));
 	return true;
 }
 
@@ -207,7 +218,7 @@ bool FGatherersQueueSecondDropSimulationRunCommand::Update()
 
 	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForDropStateCommand(Test, FPlatformTime::Seconds(), 8.0));
 	ADD_LATENT_AUTOMATION_COMMAND(FEndPlayMapCommand());
-	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForSimulationPIECleanupCommand(Test, FPlatformTime::Seconds(), 5.0));
+	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForSimulationPIECleanupCommand(Test, 5.0));
 	return true;
 }
 
@@ -228,7 +239,7 @@ bool FGatherersAntPickupActorAutomationTest::RunTest(const FString& Parameters)
 
 	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForSimulationPickupCommand(this, FPlatformTime::Seconds(), 5.0));
 	ADD_LATENT_AUTOMATION_COMMAND(FEndPlayMapCommand());
-	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForSimulationPIECleanupCommand(this, FPlatformTime::Seconds(), 5.0));
+	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForSimulationPIECleanupCommand(this, 5.0));
 	return true;
 }
 
@@ -249,7 +260,7 @@ bool FGatherersAntPickupActorRerunAutomationTest::RunTest(const FString& Paramet
 
 	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForSimulationPickupCommand(this, FPlatformTime::Seconds(), 5.0));
 	ADD_LATENT_AUTOMATION_COMMAND(FEndPlayMapCommand());
-	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForSimulationPIECleanupCommand(this, FPlatformTime::Seconds(), 5.0));
+	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForSimulationPIECleanupCommand(this, 5.0));
 	ADD_LATENT_AUTOMATION_COMMAND(FGatherersQueueSecondSimulationRunCommand(this));
 	return true;
 }
@@ -271,7 +282,7 @@ bool FGatherersAntCarryMovementAutomationTest::RunTest(const FString& Parameters
 
 	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForCarryMovementCommand(this, FPlatformTime::Seconds(), 5.0));
 	ADD_LATENT_AUTOMATION_COMMAND(FEndPlayMapCommand());
-	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForSimulationPIECleanupCommand(this, FPlatformTime::Seconds(), 5.0));
+	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForSimulationPIECleanupCommand(this, 5.0));
 	return true;
 }
 
@@ -292,7 +303,7 @@ bool FGatherersAntDropFoodAutomationTest::RunTest(const FString& Parameters)
 
 	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForDropStateCommand(this, FPlatformTime::Seconds(), 8.0));
 	ADD_LATENT_AUTOMATION_COMMAND(FEndPlayMapCommand());
-	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForSimulationPIECleanupCommand(this, FPlatformTime::Seconds(), 20.0));
+	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForSimulationPIECleanupCommand(this, 20.0));
 	return true;
 }
 
@@ -313,7 +324,7 @@ bool FGatherersAntDropFoodRerunAutomationTest::RunTest(const FString& Parameters
 
 	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForDropStateCommand(this, FPlatformTime::Seconds(), 8.0));
 	ADD_LATENT_AUTOMATION_COMMAND(FEndPlayMapCommand());
-	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForSimulationPIECleanupCommand(this, FPlatformTime::Seconds(), 5.0));
+	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForSimulationPIECleanupCommand(this, 5.0));
 	ADD_LATENT_AUTOMATION_COMMAND(FGatherersQueueSecondDropSimulationRunCommand(this));
 	return true;
 }
