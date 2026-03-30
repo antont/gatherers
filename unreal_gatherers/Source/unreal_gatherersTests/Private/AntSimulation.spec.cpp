@@ -4,7 +4,7 @@
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FGatherersAntMovementStepAutomationTest,
-	"unreal_gatherers.Simulation.AntMovementStepMovesTowardFood",
+	"default.unreal_gatherers.Simulation.AntMovementStepMovesTowardFood",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FGatherersAntMovementStepAutomationTest::RunTest(const FString& Parameters)
@@ -22,7 +22,7 @@ bool FGatherersAntMovementStepAutomationTest::RunTest(const FString& Parameters)
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FGatherersAntPickupRadiusAutomationTest,
-	"unreal_gatherers.Simulation.AntPickupTriggersWithinRadius",
+	"default.unreal_gatherers.Simulation.AntPickupTriggersWithinRadius",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FGatherersAntPickupRadiusAutomationTest::RunTest(const FString& Parameters)

@@ -7,17 +7,19 @@ engine_root="${UNREAL_ENGINE_ROOT:-/Users/Shared/Epic Games/UE_5.7}"
 build_tool="${engine_root}/Engine/Build/BatchFiles/Mac/Build.sh"
 editor_binary="${engine_root}/Engine/Binaries/Mac/UnrealEditor.app/Contents/MacOS/UnrealEditor"
 
-test_filter="unreal_gatherers"
+test_filter="default.unreal_gatherers"
 should_build=1
 
 usage() {
   cat <<'EOF'
 Usage: scripts/test_unreal.sh [options]
 
-Runs the Unreal automation suite for this project.
+Runs the default Unreal automation suite for this project.
+This path is for the non-visual automated suite only; manual and supplemental
+scenarios live outside the default namespace.
 
 Options:
-  --test FILTER   Automation filter to run (default: unreal_gatherers)
+  --test FILTER   Automation filter to run (default: default.unreal_gatherers)
   --no-build      Skip the Unreal editor target build step
   --help          Show this help
 
@@ -69,7 +71,7 @@ if [[ "${should_build}" -eq 1 ]]; then
   "${build_tool}" unreal_gatherersEditor Mac Development "-Project=${project_path}"
 fi
 
-echo "Running Unreal automation filter: ${test_filter}"
+echo "Running non-visual Unreal automation filter: ${test_filter}"
 if "${editor_binary}" \
   "${project_path}" \
   "-ExecCmds=Automation RunTest ${test_filter};Quit" \

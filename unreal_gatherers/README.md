@@ -37,7 +37,7 @@ Recommended entrypoint:
 ./scripts/test_unreal.sh
 ```
 
-This builds `unreal_gatherersEditor` and runs the full `unreal_gatherers` automation namespace.
+This builds `unreal_gatherersEditor` and runs the non-visual default `default.unreal_gatherers` automation namespace.
 
 Run the current spawning subset directly:
 
@@ -51,11 +51,24 @@ Run the current spawning subset directly:
 Useful targeted reruns:
 
 ```sh
--ExecCmds="Automation RunTest unreal_gatherers.Placeholder.LoadsTestModule;Quit"
--ExecCmds="Automation RunTest unreal_gatherers.Spawning.SpawnPlanDefinesOneAntAndOneFood;Quit"
--ExecCmds="Automation RunTest unreal_gatherers.Spawning.WorldSpawnerCreatesAntAndFoodActors;Quit"
--ExecCmds="Automation RunTest unreal_gatherers.Spawning.StartupSmokeSpawnsOneAntAndOneFood;Quit"
+-ExecCmds="Automation RunTest default.unreal_gatherers.Placeholder.LoadsTestModule;Quit"
+-ExecCmds="Automation RunTest default.unreal_gatherers.Spawning.SpawnPlanDefinesOneAntAndOneFood;Quit"
+-ExecCmds="Automation RunTest default.unreal_gatherers.Spawning.WorldSpawnerCreatesAntAndFoodActors;Quit"
+-ExecCmds="Automation RunTest default.unreal_gatherers.Simulation.AntMovesAndPicksUpFoodInWorld;Quit"
+-ExecCmds="Automation RunTest supplemental.unreal_gatherers.Spawning.StartupSmokeSpawnsOneAntAndOneFood;Quit"
 ```
+
+## Run the visual pickup demo
+
+The visual/manual pickup path is intentionally separate from `./scripts/test_unreal.sh` so the default automation suite stays clean and rerunnable.
+
+Run this scenario from the editor automation UI under:
+
+```sh
+manual.unreal_gatherers.Visual.AntPickupLeavesWorldForInspection
+```
+
+That visual/manual test loads `SimBlank` into a clean editor world, frames the viewport around the spawn area, advances the ant toward the food over time, and leaves the final picked-up state behind for inspection.
 
 ## Refresh editor indexing
 

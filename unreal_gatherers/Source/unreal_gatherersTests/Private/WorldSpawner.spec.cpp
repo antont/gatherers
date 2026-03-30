@@ -23,7 +23,7 @@ TArray<ActorType*> CollectActors(UWorld* World)
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FGatherersWorldSpawnerAutomationTest,
-	"unreal_gatherers.Spawning.WorldSpawnerCreatesAntAndFoodActors",
+	"default.unreal_gatherers.Spawning.WorldSpawnerCreatesAntAndFoodActors",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FGatherersWorldSpawnerAutomationTest::RunTest(const FString& Parameters)

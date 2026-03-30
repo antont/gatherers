@@ -3,7 +3,7 @@
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FGatherersSpawnPlanAutomationTest,
-	"unreal_gatherers.Spawning.SpawnPlanDefinesOneAntAndOneFood",
+	"default.unreal_gatherers.Spawning.SpawnPlanDefinesOneAntAndOneFood",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FGatherersSpawnPlanAutomationTest::RunTest(const FString& Parameters)

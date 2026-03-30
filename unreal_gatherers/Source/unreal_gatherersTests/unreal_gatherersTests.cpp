@@ -15,7 +15,7 @@ void Funreal_gatherersTestsModule::ShutdownModule()
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FGatherersPlaceholderAutomationTest,
-	"unreal_gatherers.Placeholder.LoadsTestModule",
+	"default.unreal_gatherers.Placeholder.LoadsTestModule",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FGatherersPlaceholderAutomationTest::RunTest(const FString& Parameters)
