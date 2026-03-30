@@ -19,4 +19,6 @@ private:
 	AFood* FindClosestLooseFood() const;
 	bool IsCarryingFood() const;
 	void PickUpFood(AFood& Food);
+
+	FVector MovementDirection = FVector(1.0f, 0.0f, 0.0f);
 };

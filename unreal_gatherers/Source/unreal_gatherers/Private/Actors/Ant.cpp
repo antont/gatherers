@@ -54,8 +54,11 @@ void AAnt::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 
+	const FVector CurrentLocation = GetActorLocation();
+
 	if (IsCarryingFood())
 	{
+		SetActorLocation(CurrentLocation + MovementDirection.GetSafeNormal() * AntMovementSpeed * FMath::Max(0.0f, DeltaSeconds));
 		return;
 	}
 
@@ -65,11 +68,16 @@ void AAnt::Tick(float DeltaSeconds)
 		return;
 	}
 
-	const FVector CurrentLocation = GetActorLocation();
 	const FVector FoodLocation = TargetFood->GetActorLocation();
+	const FVector ToFood = FoodLocation - CurrentLocation;
+	if (!ToFood.IsNearlyZero())
+	{
+		MovementDirection = ToFood.GetSafeNormal();
+	}
 
 	if (ShouldAntPickUpFood(CurrentLocation, FoodLocation, AntPickupRadius))
 	{
+		MovementDirection = ComputeAntRetargetDirection(MovementDirection, 0.0f);
 		PickUpFood(*TargetFood);
 		return;
 	}
@@ -117,5 +125,5 @@ bool AAnt::IsCarryingFood() const
 void AAnt::PickUpFood(AFood& Food)
 {
 	Food.AttachToComponent(GetRootComponent(), FAttachmentTransformRules::KeepWorldTransform);
-	Food.SetActorRelativeLocation(FVector(0.0f, 0.0f, CarriedFoodHeight));
+	Food.SetActorRelativeLocation(ComputeCarriedFoodRelativeLocation(CarriedFoodHeight));
 }
