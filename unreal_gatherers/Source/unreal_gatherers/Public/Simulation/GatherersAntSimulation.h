@@ -14,6 +14,13 @@ UNREAL_GATHERERS_API FVector ComputeAntNextLocation(
 	float MovementSpeed,
 	float DeltaSeconds);
 
+UNREAL_GATHERERS_API FVector ComputeAntHeadingMovementStep(
+	const FVector& CurrentLocation,
+	const FVector& HeadingDirection,
+	float MovementSpeed,
+	float SafeStepDistance,
+	float DeltaSeconds);
+
 UNREAL_GATHERERS_API bool ShouldAntPickUpFood(
 	const FVector& AntLocation,
 	const FVector& FoodLocation,

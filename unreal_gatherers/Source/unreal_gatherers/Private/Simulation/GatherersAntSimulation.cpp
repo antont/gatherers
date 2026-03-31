@@ -23,6 +23,24 @@ FVector ComputeAntNextLocation(
 	return CurrentLocation + ToFood.GetSafeNormal() * MaxStepDistance;
 }
 
+FVector ComputeAntHeadingMovementStep(
+	const FVector& CurrentLocation,
+	const FVector& HeadingDirection,
+	float MovementSpeed,
+	float SafeStepDistance,
+	float DeltaSeconds)
+{
+	const FVector SafeHeading = HeadingDirection.GetSafeNormal();
+	if (SafeHeading.IsNearlyZero())
+	{
+		return CurrentLocation;
+	}
+
+	const float MaxDistanceThisFrame = FMath::Max(0.0f, MovementSpeed) * FMath::Max(0.0f, DeltaSeconds);
+	const float ClampedStepDistance = FMath::Min(MaxDistanceThisFrame, FMath::Max(0.0f, SafeStepDistance));
+	return CurrentLocation + SafeHeading * ClampedStepDistance;
+}
+
 bool ShouldAntPickUpFood(
 	const FVector& AntLocation,
 	const FVector& FoodLocation,
