@@ -11,6 +11,41 @@ const Cooldown = components.Cooldown;
 const Carrying = components.Carrying;
 const CarriedBy = components.CarriedBy;
 
+// --- Boundary Wrap System ---
+
+pub fn boundaryWrapSystem(world: *ecs.world_t, map_width: f32, map_height: f32) void {
+    const half_w = map_width / 2.0;
+    const half_h = map_height / 2.0;
+
+    var desc = std.mem.zeroes(ecs.query_desc_t);
+    desc.terms[0] = .{ .id = ecs.id(Position), .inout = .InOut };
+    desc.terms[1] = .{ .id = ecs.id(Bounding), .inout = .In };
+    desc.terms[2] = .{ .id = ecs.id(components.BoundaryWrap) };
+
+    const query = ecs.query_init(world, &desc) catch return;
+    defer ecs.query_fini(query);
+
+    var it = ecs.query_iter(world, query);
+    while (ecs.query_next(&it)) {
+        const positions = ecs.field(&it, Position, 0).?;
+        const boundings = ecs.field(&it, Bounding, 1).?;
+
+        for (positions, boundings) |*pos, bnd| {
+            const r = bnd.radius;
+            if (pos.x - r > half_w) {
+                pos.x = -half_w - r;
+            } else if (pos.x + r < -half_w) {
+                pos.x = half_w + r;
+            }
+            if (pos.y - r > half_h) {
+                pos.y = -half_h - r;
+            } else if (pos.y + r < -half_h) {
+                pos.y = half_h + r;
+            }
+        }
+    }
+}
+
 // --- Movement System ---
 
 pub fn movementSystem(world: *ecs.world_t, settings: *const config.SimulationSettings, delta: f32) void {
@@ -140,8 +175,8 @@ test "boundary wrap: ant past right edge wraps to left" {
     defer _ = ecs.fini(world);
 
     // Map 1280x720: half_width = 640
-    // Ant at x=650 with radius 10: 650-10=640 > 640 → wraps
-    const ant = spawnTestAnt(world, 650.0, 0.0, 1.0, 0.0);
+    // Ant at x=651 with radius 10: 651-10=641 > 640 → wraps
+    const ant = spawnTestAnt(world, 651.0, 0.0, 1.0, 0.0);
 
     boundaryWrapSystem(world, config.map_width, config.map_height);
 
@@ -153,8 +188,8 @@ test "boundary wrap: ant past left edge wraps to right" {
     const world = createTestWorld();
     defer _ = ecs.fini(world);
 
-    // Ant at x=-650 with radius 10: -650+10=-640 < -640 → wraps
-    const ant = spawnTestAnt(world, -650.0, 0.0, 1.0, 0.0);
+    // Ant at x=-651 with radius 10: -651+10=-641 < -640 → wraps
+    const ant = spawnTestAnt(world, -651.0, 0.0, 1.0, 0.0);
 
     boundaryWrapSystem(world, config.map_width, config.map_height);
 
@@ -179,8 +214,8 @@ test "boundary wrap: vertical wrapping" {
     const world = createTestWorld();
     defer _ = ecs.fini(world);
 
-    // half_height = 360, ant at y=370 with radius 10: 370-10=360 > 360 → wraps
-    const ant = spawnTestAnt(world, 0.0, 370.0, 1.0, 0.0);
+    // half_height = 360, ant at y=371 with radius 10: 371-10=361 > 360 → wraps
+    const ant = spawnTestAnt(world, 0.0, 371.0, 1.0, 0.0);
 
     boundaryWrapSystem(world, config.map_width, config.map_height);
 
