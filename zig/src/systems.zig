@@ -369,3 +369,96 @@ test "collision: only one hit per ant per frame" {
     // Should only get 1 hit even though 2 foods are nearby
     try std.testing.expectEqual(@as(usize, 1), hits.items.len);
 }
+
+// =============================================================================
+// Ant Hits System Tests (pickup / drop)
+// =============================================================================
+
+test "ant hits: pickup — ant without food picks up food" {
+    const world = createTestWorld();
+    defer _ = ecs.fini(world);
+
+    const ant = spawnTestAnt(world, 5.0, 0.0, 1.0, 0.0);
+    const food = spawnTestFood(world, 10.0, 0.0);
+
+    var rng = std.Random.DefaultPrng.init(42);
+
+    const hit = HitEvent{ .ant = ant, .food = food };
+    antHitsSystem(world, &[_]HitEvent{hit}, rng.random());
+
+    // Ant should now be carrying this food
+    const carrying = ecs.get(world, ant, Carrying);
+    try std.testing.expect(carrying != null);
+    try std.testing.expectEqual(food, carrying.?.food);
+
+    // Food should have CarriedBy and lose Collidable
+    const carried_by = ecs.get(world, food, CarriedBy);
+    try std.testing.expect(carried_by != null);
+    try std.testing.expectEqual(ant, carried_by.?.ant);
+    try std.testing.expect(!ecs.has_id(world, food, ecs.id(components.Collidable)));
+
+    // Ant velocity should have changed (turned ~180 degrees)
+    const vel = ecs.get(world, ant, Velocity).?;
+    // Original direction was (1, 0), reversed would be roughly (-1, 0) ± random
+    // Just check it's different from original
+    try std.testing.expect(vel.x != 1.0 or vel.y != 0.0);
+}
+
+test "ant hits: drop — ant carrying food drops it on new collision" {
+    const world = createTestWorld();
+    defer _ = ecs.fini(world);
+
+    const ant = spawnTestAnt(world, 5.0, 0.0, 1.0, 0.0);
+    const carried_food = spawnTestFood(world, 0.0, 0.0);
+    const new_food = spawnTestFood(world, 10.0, 0.0);
+
+    // Manually set ant as carrying
+    _ = ecs.set(world, ant, Carrying, .{ .food = carried_food });
+    _ = ecs.set(world, carried_food, CarriedBy, .{ .ant = ant });
+    ecs.remove(world, carried_food, components.Collidable);
+
+    var rng = std.Random.DefaultPrng.init(42);
+
+    const hit = HitEvent{ .ant = ant, .food = new_food };
+    antHitsSystem(world, &[_]HitEvent{hit}, rng.random());
+
+    // Ant should no longer be carrying
+    const carrying = ecs.get(world, ant, Carrying);
+    try std.testing.expect(carrying == null);
+
+    // Carried food should be dropped: CarriedBy removed, Collidable re-added
+    const carried_by = ecs.get(world, carried_food, CarriedBy);
+    try std.testing.expect(carried_by == null);
+    try std.testing.expect(ecs.has_id(world, carried_food, ecs.id(components.Collidable)));
+
+    // Dropped food gets ant's position
+    const food_pos = ecs.get(world, carried_food, Position).?;
+    try std.testing.expectApproxEqAbs(@as(f32, 5.0), food_pos.x, 0.01);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), food_pos.y, 0.01);
+
+    // Ant should have cooldown
+    const cooldown = ecs.get(world, ant, Cooldown);
+    try std.testing.expect(cooldown != null);
+    try std.testing.expectApproxEqAbs(config.base_pickup_cooldown, cooldown.?.timer, 0.01);
+}
+
+test "ant hits: ant with cooldown ignores hits" {
+    const world = createTestWorld();
+    defer _ = ecs.fini(world);
+
+    const ant = spawnTestAnt(world, 5.0, 0.0, 1.0, 0.0);
+    _ = ecs.set(world, ant, Cooldown, .{ .timer = 0.5 });
+    const food = spawnTestFood(world, 10.0, 0.0);
+
+    var rng = std.Random.DefaultPrng.init(42);
+
+    const hit = HitEvent{ .ant = ant, .food = food };
+    antHitsSystem(world, &[_]HitEvent{hit}, rng.random());
+
+    // Ant should NOT be carrying — cooldown blocks pickup
+    const carrying = ecs.get(world, ant, Carrying);
+    try std.testing.expect(carrying == null);
+
+    // Food should still be collidable (not picked up)
+    try std.testing.expect(ecs.has_id(world, food, ecs.id(components.Collidable)));
+}
