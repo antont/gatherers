@@ -11,6 +11,82 @@ const Cooldown = components.Cooldown;
 const Carrying = components.Carrying;
 const CarriedBy = components.CarriedBy;
 
+// --- Hit Event ---
+
+pub const HitEvent = struct {
+    food: ecs.entity_t,
+    ant: ecs.entity_t,
+};
+
+// --- Spatial Index Update System ---
+
+pub fn updateSpatialIndexSystem(world: *ecs.world_t, si: *SpatialIndex) void {
+    si.clear();
+
+    var desc = std.mem.zeroes(ecs.query_desc_t);
+    desc.terms[0] = .{ .id = ecs.id(Position), .inout = .In };
+    desc.terms[1] = .{ .id = ecs.id(components.Food) };
+    desc.terms[2] = .{ .id = ecs.id(components.Collidable) };
+
+    const query = ecs.query_init(world, &desc) catch return;
+    defer ecs.query_fini(query);
+
+    var it = ecs.query_iter(world, query);
+    while (ecs.query_next(&it)) {
+        const positions = ecs.field(&it, Position, 0).?;
+        const entities = it.entities();
+
+        for (positions, entities) |pos, entity| {
+            si.insert(entity, pos.x, pos.y) catch continue;
+        }
+    }
+}
+
+// --- Collision Detection System ---
+
+pub fn collisionDetectionSystem(world: *ecs.world_t, si: *SpatialIndex, hits: *std.ArrayList(HitEvent), allocator: std.mem.Allocator) void {
+    var desc = std.mem.zeroes(ecs.query_desc_t);
+    desc.terms[0] = .{ .id = ecs.id(Position), .inout = .In };
+    desc.terms[1] = .{ .id = ecs.id(Bounding), .inout = .In };
+    desc.terms[2] = .{ .id = ecs.id(components.Ant) };
+    desc.terms[3] = .{ .id = ecs.id(components.Collidable) };
+
+    const query = ecs.query_init(world, &desc) catch return;
+    defer ecs.query_fini(query);
+
+    var it = ecs.query_iter(world, query);
+    while (ecs.query_next(&it)) {
+        const positions = ecs.field(&it, Position, 0).?;
+        const boundings = ecs.field(&it, Bounding, 1).?;
+        const entities = it.entities();
+
+        for (positions, boundings, entities) |ant_pos, ant_bnd, ant_entity| {
+            const nearby = si.getNearby(ant_pos.x, ant_pos.y) catch continue;
+            defer si.allocator.free(nearby);
+
+            for (nearby) |food_entity| {
+                // Get food position and bounding from the world
+                const food_pos = ecs.get(world, food_entity, Position) orelse continue;
+                const food_bnd = ecs.get(world, food_entity, Bounding) orelse continue;
+
+                // Check if food is still collidable
+                if (!ecs.has_id(world, food_entity, ecs.id(components.Collidable))) continue;
+
+                const dx = food_pos.x - ant_pos.x;
+                const dy = food_pos.y - ant_pos.y;
+                const dist_sq = dx * dx + dy * dy;
+                const radius_sum = ant_bnd.radius + food_bnd.radius;
+                const coll_dist_sq = radius_sum * radius_sum;
+
+                if (dist_sq < coll_dist_sq) {
+                    hits.append(allocator, .{ .food = food_entity, .ant = ant_entity }) catch continue;
+                    break; // One collision per ant per frame
+                }
+            }
+        }
+    }
+}
+
 // --- Boundary Wrap System ---
 
 pub fn boundaryWrapSystem(world: *ecs.world_t, map_width: f32, map_height: f32) void {
@@ -236,14 +312,14 @@ test "collision: ant near food produces hit event" {
 
     var si = SpatialIndex.init(std.testing.allocator);
     defer si.deinit();
-    var hits = std.ArrayList(HitEvent).init(std.testing.allocator);
-    defer hits.deinit();
+    var hits: std.ArrayList(HitEvent) = .{};
+    defer hits.deinit(std.testing.allocator);
 
     // Build spatial index with food
     const food_pos = ecs.get(world, food, Position).?;
     try si.insert(food, food_pos.x, food_pos.y);
 
-    collisionDetectionSystem(world, &si, &hits);
+    collisionDetectionSystem(world, &si, &hits, std.testing.allocator);
 
     try std.testing.expectEqual(@as(usize, 1), hits.items.len);
     try std.testing.expectEqual(ant, hits.items[0].ant);
@@ -259,13 +335,13 @@ test "collision: ant far from food produces no hit" {
 
     var si = SpatialIndex.init(std.testing.allocator);
     defer si.deinit();
-    var hits = std.ArrayList(HitEvent).init(std.testing.allocator);
-    defer hits.deinit();
+    var hits: std.ArrayList(HitEvent) = .{};
+    defer hits.deinit(std.testing.allocator);
 
     const food_pos = ecs.get(world, food, Position).?;
     try si.insert(food, food_pos.x, food_pos.y);
 
-    collisionDetectionSystem(world, &si, &hits);
+    collisionDetectionSystem(world, &si, &hits, std.testing.allocator);
 
     try std.testing.expectEqual(@as(usize, 0), hits.items.len);
 }
@@ -280,15 +356,15 @@ test "collision: only one hit per ant per frame" {
 
     var si = SpatialIndex.init(std.testing.allocator);
     defer si.deinit();
-    var hits = std.ArrayList(HitEvent).init(std.testing.allocator);
-    defer hits.deinit();
+    var hits: std.ArrayList(HitEvent) = .{};
+    defer hits.deinit(std.testing.allocator);
 
     const f1_pos = ecs.get(world, food1, Position).?;
     const f2_pos = ecs.get(world, food2, Position).?;
     try si.insert(food1, f1_pos.x, f1_pos.y);
     try si.insert(food2, f2_pos.x, f2_pos.y);
 
-    collisionDetectionSystem(world, &si, &hits);
+    collisionDetectionSystem(world, &si, &hits, std.testing.allocator);
 
     // Should only get 1 hit even though 2 foods are nearby
     try std.testing.expectEqual(@as(usize, 1), hits.items.len);
