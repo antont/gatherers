@@ -3,6 +3,7 @@
 #include "Actors/Ant.h"
 #include "Actors/Food.h"
 #include "Engine/World.h"
+#include "Simulation/GatherersMassSubsystem.h"
 #include "Simulation/GatherersSpawnPlan.h"
 
 FGatherersSpawnResult SpawnGatherersActors(UWorld& World, const FGatherersSpawnPlan& Plan)
@@ -31,6 +32,14 @@ FGatherersSpawnResult SpawnGatherersActors(UWorld& World, const FGatherersSpawnP
 		if (AFood* Food = World.SpawnActor<AFood>(AFood::StaticClass(), SpawnTransform))
 		{
 			Result.Foods.Add(Food);
+		}
+	}
+
+	if (Plan.bUseMassSimulation)
+	{
+		if (UGatherersMassSubsystem* MassSubsystem = World.GetSubsystem<UGatherersMassSubsystem>())
+		{
+			MassSubsystem->InitializeHybridSimulation(Result, Plan);
 		}
 	}
 

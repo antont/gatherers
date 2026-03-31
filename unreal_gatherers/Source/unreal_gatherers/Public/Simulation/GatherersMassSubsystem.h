@@ -1,0 +1,71 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "MassEntityElementTypes.h"
+#include "MassEntityHandle.h"
+#include "Subsystems/WorldSubsystem.h"
+#include "GatherersMassSubsystem.generated.h"
+
+class AAnt;
+class AFood;
+class UMassEntitySubsystem;
+struct FGatherersSpawnPlan;
+struct FGatherersSpawnResult;
+
+USTRUCT()
+struct UNREAL_GATHERERS_API FGatherersMassAntTag : public FMassTag
+{
+	GENERATED_BODY()
+};
+
+USTRUCT()
+struct UNREAL_GATHERERS_API FGatherersMassFoodTag : public FMassTag
+{
+	GENERATED_BODY()
+};
+
+USTRUCT()
+struct UNREAL_GATHERERS_API FGatherersMassAntFragment : public FMassFragment
+{
+	GENERATED_BODY()
+
+	FVector Position = FVector::ZeroVector;
+	FVector Direction = FVector(1.0f, 0.0f, 0.0f);
+	FBox PlayAreaBounds = FBox(EForceInit::ForceInit);
+	FMassEntityHandle CarriedFoodEntity;
+	TWeakObjectPtr<AAnt> ProxyActor = nullptr;
+	float PickupCooldownRemainingSeconds = 0.0f;
+	float MovementSpeed = 100.0f;
+	float TurnJitterRadians = PI / 2.0f;
+	int32 RandomSeed = 0;
+};
+
+USTRUCT()
+struct UNREAL_GATHERERS_API FGatherersMassFoodFragment : public FMassFragment
+{
+	GENERATED_BODY()
+
+	FVector Position = FVector::ZeroVector;
+	TWeakObjectPtr<AFood> ProxyActor = nullptr;
+	bool bIsLoose = true;
+};
+
+UCLASS()
+class UNREAL_GATHERERS_API UGatherersMassSubsystem : public UTickableWorldSubsystem
+{
+	GENERATED_BODY()
+
+public:
+	virtual void Tick(float DeltaTime) override;
+	virtual TStatId GetStatId() const override;
+
+	void InitializeHybridSimulation(const FGatherersSpawnResult& SpawnResult, const FGatherersSpawnPlan& Plan);
+	void ResetSimulation();
+
+	int32 GetManagedAntCount() const;
+	int32 GetManagedFoodCount() const;
+	bool HasManagedSimulation() const;
+
+	TArray<FMassEntityHandle> ManagedAntEntities;
+	TArray<FMassEntityHandle> ManagedFoodEntities;
+};
