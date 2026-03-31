@@ -65,7 +65,7 @@ void AAnt::Tick(float DeltaSeconds)
 		FVector NextLocation = ComputeAntHeadingMovementStep(
 			CurrentLocation,
 			MovementDirection,
-			AntMovementSpeed,
+			FullSimulationMovementSpeed,
 			AntSafeStepDistance,
 			DeltaSeconds);
 
@@ -188,6 +188,11 @@ void AAnt::SetFullSimulationTurnJitterRadians(float InTurnJitterRadians)
 	FullSimulationTurnJitterRadians = FMath::Max(0.0f, InTurnJitterRadians);
 }
 
+void AAnt::SetFullSimulationMovementSpeed(float InMovementSpeed)
+{
+	FullSimulationMovementSpeed = FMath::Max(0.0f, InMovementSpeed);
+}
+
 AFood* AAnt::FindClosestLooseFood() const
 {
 	UWorld* World = GetWorld();
@@ -267,7 +272,7 @@ void AAnt::DropFood()
 	CarriedFood->SetActorLocation(DroppedFoodLocation);
 	CarriedFood = nullptr;
 	PickupCooldownRemainingSeconds = bUseFullSimulationMode
-		? ComputePickupCooldownForSeparationDistance(AntPickupSeparationDistance, AntMovementSpeed)
+		? ComputePickupCooldownForSeparationDistance(AntPickupSeparationDistance, FullSimulationMovementSpeed)
 		: AntPickupCooldownSeconds;
 
 	if (!bUseFullSimulationMode)
