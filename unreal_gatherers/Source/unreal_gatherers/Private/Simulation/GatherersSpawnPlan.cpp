@@ -1,5 +1,7 @@
 #include "Simulation/GatherersSpawnPlan.h"
 
+#include "Math/RandomStream.h"
+
 FGatherersSpawnPlan BuildInitialGatherersSpawnPlan()
 {
 	FGatherersSpawnPlan Plan;
@@ -48,5 +50,19 @@ FGatherersSpawnPlan BuildFullSimulationSpawnPlan(
 			FoodZ)));
 	}
 
+	return Plan;
+}
+
+FGatherersSpawnPlan BuildFullSimulationVisualSpawnPlan()
+{
+	FGatherersSpawnPlan Plan;
+	Plan.bUseFullSimulationMode = true;
+	Plan.PlayAreaBounds = FBox(FVector(-120.0f, -100.0f, -100.0f), FVector(120.0f, 100.0f, 100.0f));
+	Plan.RandomSeedBase = 123;
+	Plan.AntSpawns.Add(FTransform(FVector::ZeroVector));
+	Plan.AntInitialDirections.Add(FVector(1.0f, 0.0f, 0.0f));
+	Plan.FoodSpawns.Add(FTransform(FVector(8.0f, 0.0f, 0.0f)));
+	Plan.FoodSpawns.Add(FTransform(FVector(-10.0f, 0.0f, 0.0f)));
+	Plan.FoodSpawns.Add(FTransform(FVector(50.0f, 0.0f, 0.0f)));
 	return Plan;
 }

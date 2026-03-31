@@ -18,3 +18,4 @@ UNREAL_GATHERERS_API FGatherersSpawnPlan BuildFullSimulationSpawnPlan(
 	int32 FoodCount,
 	int32 RandomSeed,
 	const FBox& PlayAreaBounds);
+UNREAL_GATHERERS_API FGatherersSpawnPlan BuildFullSimulationVisualSpawnPlan();

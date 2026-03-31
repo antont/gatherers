@@ -7,11 +7,11 @@ Unreal 5.7 port of the `gatherers` simulation.
 Current implemented slice:
 
 - editor-only automation test module
-- deterministic spawn plan with one ant and two foods
-- `AAnt`/`AFood` repeated gather loop
+- preserved deterministic gather-demo path with one ant and two foods
+- separate full-simulation path with heading-based movement, pickup/drop, cooldown, and border turn-back
 - startup integration through `Aunreal_gatherersGameModeBase`
 - standalone `-game` launch into `SimBlank`
-- visual/manual editor inspection path
+- separate visual/manual editor inspection paths for the deterministic demo and the new full simulation
 
 Still out of scope:
 
@@ -55,18 +55,25 @@ Useful targeted reruns:
 -ExecCmds="Automation RunTest default.unreal_gatherers.Simulation.AntMovesAndPicksUpFoodInWorld;Quit"
 -ExecCmds="Automation RunTest default.unreal_gatherers.Simulation.AntDropsFoodBackIntoWorld;Quit"
 -ExecCmds="Automation RunTest default.unreal_gatherers.Simulation.AntDropsFoodTwiceInSameEditorSession;Quit"
+-ExecCmds="Automation RunTest default.unreal_gatherers.FullSimulation;Quit"
 -ExecCmds="Automation RunTest supplemental.unreal_gatherers.Spawning.StartupSmokeSpawnsOneAntAndTwoFoods;Quit"
 ```
 
-## Run the visual gather demo
+## Run the visual gather demos
 
 The visual/manual pickup path is intentionally separate from `./scripts/test_unreal.sh` so the default automation suite stays clean and rerunnable.
 
-Run this scenario from the editor automation UI under:
+Deterministic gather-demo path:
 
 `manual.unreal_gatherers.Visual.AntFirstDropLeavesWorldForInspection`
 
 That visual/manual test loads `SimBlank` into a clean editor world, frames the viewport around the two-food layout, advances the ant through pickup and return, and leaves the first dropped-food state behind for inspection.
+
+Full-simulation path:
+
+`manual.unreal_gatherers.Visual.FullSimulationSecondPickupStaysVisible`
+
+That visual/manual test also loads `SimBlank` into a clean editor world, but it uses the separate full-simulation spawn harness and runtime path. It shows a heading-driven ant pick up food, drop it, cool down, and reach a second pickup state for inspection.
 
 ## Refresh editor indexing
 
@@ -93,4 +100,4 @@ The current startup path should load:
 - `/Game/SimBlank/Levels/SimBlank`
 - `unreal_gatherersGameModeBase`
 
-and spawn one ant actor plus two food actors.
+and spawn the preserved deterministic gather-demo path with one ant actor plus two food actors.
