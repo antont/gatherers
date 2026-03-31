@@ -76,6 +76,30 @@ pub fn antHitsSystem(world: *ecs.world_t, hits: []const HitEvent, random: std.Ra
     }
 }
 
+// --- Cooldown System ---
+
+pub fn cooldownSystem(world: *ecs.world_t, delta: f32) void {
+    var desc = std.mem.zeroes(ecs.query_desc_t);
+    desc.terms[0] = .{ .id = ecs.id(Cooldown), .inout = .InOut };
+    desc.terms[1] = .{ .id = ecs.id(components.Ant) };
+
+    const query = ecs.query_init(world, &desc) catch return;
+    defer ecs.query_fini(query);
+
+    var it = ecs.query_iter(world, query);
+    while (ecs.query_next(&it)) {
+        const cooldowns = ecs.field(&it, Cooldown, 0).?;
+        const entities = it.entities();
+
+        for (cooldowns, entities) |*cd, entity| {
+            cd.timer -= delta;
+            if (cd.timer <= 0) {
+                ecs.remove(world, entity, Cooldown);
+            }
+        }
+    }
+}
+
 // --- Spatial Index Update System ---
 
 pub fn updateSpatialIndexSystem(world: *ecs.world_t, si: *SpatialIndex) void {
