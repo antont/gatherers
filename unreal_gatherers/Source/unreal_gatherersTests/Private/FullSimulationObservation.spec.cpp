@@ -50,7 +50,7 @@ bool FGatherersFullSimulationFirstDropAutomationTest::RunTest(const FString& Par
 	}
 
 	AAnt* Ant = World->SpawnActor<AAnt>(AAnt::StaticClass(), FTransform(FVector::ZeroVector));
-	TArray<AFood*> Foods = SpawnFoods(*World, {FVector(8.0f, 0.0f, 0.0f), FVector(-10.0f, 0.0f, 0.0f), FVector(-50.0f, 0.0f, 0.0f)});
+	TArray<AFood*> Foods = SpawnFoods(*World, {FVector(8.0f, 0.0f, 0.0f), FVector(-10.0f, 0.0f, 0.0f), FVector(50.0f, 0.0f, 0.0f)});
 	TestNotNull(TEXT("full-sim observation ant should spawn"), Ant);
 	TestEqual(TEXT("full-sim observation food count"), Foods.Num(), 3);
 
@@ -99,7 +99,7 @@ bool FGatherersFullSimulationCooldownAutomationTest::RunTest(const FString& Para
 	}
 
 	AAnt* Ant = World->SpawnActor<AAnt>(AAnt::StaticClass(), FTransform(FVector::ZeroVector));
-	TArray<AFood*> Foods = SpawnFoods(*World, {FVector(8.0f, 0.0f, 0.0f), FVector(-10.0f, 0.0f, 0.0f), FVector(-50.0f, 0.0f, 0.0f)});
+	TArray<AFood*> Foods = SpawnFoods(*World, {FVector(8.0f, 0.0f, 0.0f), FVector(-10.0f, 0.0f, 0.0f), FVector(50.0f, 0.0f, 0.0f)});
 	TestNotNull(TEXT("full-sim cooldown ant should spawn"), Ant);
 	TestEqual(TEXT("full-sim cooldown food count"), Foods.Num(), 3);
 
@@ -118,7 +118,7 @@ bool FGatherersFullSimulationCooldownAutomationTest::RunTest(const FString& Para
 
 	TestEqual(TEXT("cooldown blocks immediate re-pickup right after the first drop"), CountAttachedFoods(Foods), 0);
 
-	for (int32 StepIndex = 0; StepIndex < 4; ++StepIndex)
+	for (int32 StepIndex = 0; StepIndex < 5; ++StepIndex)
 	{
 		Ant->Tick(0.1f);
 	}

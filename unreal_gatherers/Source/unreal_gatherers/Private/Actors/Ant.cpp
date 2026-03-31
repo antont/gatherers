@@ -17,7 +17,6 @@ constexpr float CarriedFoodHeight = 20.0f;
 constexpr float AntPickupCooldownSeconds = 0.5f;
 constexpr float AntSafeStepDistance = 18.0f;
 constexpr float AntPickupSeparationDistance = 50.0f;
-constexpr float AntTurnJitterRadians = PI / 2.0f;
 const FLinearColor AntColor(0.8f, 0.8f, 0.8f, 1.0f);
 const FVector AntVisualScale(0.2f, 0.2f, 0.2f);
 }
@@ -113,7 +112,7 @@ void AAnt::Tick(float DeltaSeconds)
 			MovementDirection = ComputeAntTurnDirection(
 				MovementDirection,
 				FullSimulationRandomStream.FRandRange(-1.0f, 1.0f),
-				AntTurnJitterRadians);
+				FullSimulationTurnJitterRadians);
 
 			if (IsCarryingFood())
 			{
@@ -182,6 +181,11 @@ void AAnt::ConfigureForFullSimulation(const FVector& InitialDirection, const FBo
 
 	FullSimulationBounds = PlayAreaBounds;
 	FullSimulationRandomStream.Initialize(RandomSeed);
+}
+
+void AAnt::SetFullSimulationTurnJitterRadians(float InTurnJitterRadians)
+{
+	FullSimulationTurnJitterRadians = FMath::Max(0.0f, InTurnJitterRadians);
 }
 
 AFood* AAnt::FindClosestLooseFood() const
@@ -258,7 +262,9 @@ void AAnt::DropFood()
 		return;
 	}
 
+	const FVector DroppedFoodLocation = GetActorLocation();
 	CarriedFood->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
+	CarriedFood->SetActorLocation(DroppedFoodLocation);
 	CarriedFood = nullptr;
 	PickupCooldownRemainingSeconds = bUseFullSimulationMode
 		? ComputePickupCooldownForSeparationDistance(AntPickupSeparationDistance, AntMovementSpeed)

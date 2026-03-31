@@ -15,6 +15,7 @@ public:
 	AAnt();
 	virtual void Tick(float DeltaSeconds) override;
 	void ConfigureForFullSimulation(const FVector& InitialDirection, const FBox& PlayAreaBounds, int32 RandomSeed);
+	void SetFullSimulationTurnJitterRadians(float InTurnJitterRadians);
 
 private:
 	AFood* FindClosestLooseFood() const;
@@ -28,5 +29,6 @@ private:
 	FBox FullSimulationBounds = FBox(EForceInit::ForceInit);
 	TObjectPtr<AFood> CarriedFood = nullptr;
 	float PickupCooldownRemainingSeconds = 0.0f;
+	float FullSimulationTurnJitterRadians = PI / 2.0f;
 	FRandomStream FullSimulationRandomStream;
 };
