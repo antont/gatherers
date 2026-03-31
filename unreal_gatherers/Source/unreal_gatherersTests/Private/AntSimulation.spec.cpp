@@ -131,3 +131,19 @@ bool FGatherersFullSimTurnDirectionAutomationTest::RunTest(const FString& Parame
 		TurnedDirection.Equals(FVector(0.0f, -1.0f, 0.0f), KINDA_SMALL_NUMBER));
 	return true;
 }
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FGatherersPickupSeparationCooldownAutomationTest,
+	"default.unreal_gatherers.Simulation.FullSimPickupCooldownPreservesDropSeparationDistance",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FGatherersPickupSeparationCooldownAutomationTest::RunTest(const FString& Parameters)
+{
+	const float CooldownSeconds = ComputePickupCooldownForSeparationDistance(50.0f, 100.0f);
+
+	TestEqual(
+		TEXT("full-sim cooldown can be derived from the desired separation distance and movement speed"),
+		CooldownSeconds,
+		0.5f);
+	return true;
+}
