@@ -30,6 +30,11 @@ UNREAL_GATHERERS_API FVector ComputeAntRetargetDirection(
 	const FVector& CurrentDirection,
 	float RetargetJitterRadians);
 
+UNREAL_GATHERERS_API FVector ComputeAntTurnDirection(
+	const FVector& CurrentDirection,
+	float NormalizedJitterAlpha,
+	float MaxTurnJitterRadians);
+
 UNREAL_GATHERERS_API int32 FindClosestLooseFoodTargetIndex(
 	const FVector& AntLocation,
 	const TArray<FGatherersFoodTarget>& FoodTargets);

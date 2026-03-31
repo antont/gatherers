@@ -65,6 +65,15 @@ FVector ComputeAntRetargetDirection(
 	return FVector(FMath::Cos(RetargetAngle), FMath::Sin(RetargetAngle), 0.0f).GetSafeNormal();
 }
 
+FVector ComputeAntTurnDirection(
+	const FVector& CurrentDirection,
+	float NormalizedJitterAlpha,
+	float MaxTurnJitterRadians)
+{
+	const float ClampedJitterAlpha = FMath::Clamp(NormalizedJitterAlpha, -1.0f, 1.0f);
+	return ComputeAntRetargetDirection(CurrentDirection, ClampedJitterAlpha * FMath::Max(0.0f, MaxTurnJitterRadians));
+}
+
 int32 FindClosestLooseFoodTargetIndex(
 	const FVector& AntLocation,
 	const TArray<FGatherersFoodTarget>& FoodTargets)
