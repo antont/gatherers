@@ -32,7 +32,6 @@ bool FGatherersMassBoundaryAutomationTest::RunTest(const FString& Parameters)
 
 	FGatherersSpawnPlan Plan;
 	Plan.bUseFullSimulationMode = true;
-	Plan.bUseMassSimulation = true;
 	Plan.PlayAreaBounds = FBox(FVector(-100.0f, -100.0f, -100.0f), FVector(100.0f, 100.0f, 100.0f));
 	Plan.AntSpawns.Add(FTransform(FVector(95.0f, 0.0f, 0.0f)));
 	Plan.AntInitialDirections.Add(FVector(1.0f, 0.0f, 0.0f));
@@ -44,6 +43,11 @@ bool FGatherersMassBoundaryAutomationTest::RunTest(const FString& Parameters)
 	{
 		return false;
 	}
+
+	TestTrue(
+		TEXT("Mass subsystem should store the active shared play area bounds for the simulation"),
+		MassSubsystem->GetSimulationBounds().Min.Equals(Plan.PlayAreaBounds.Min, KINDA_SMALL_NUMBER)
+			&& MassSubsystem->GetSimulationBounds().Max.Equals(Plan.PlayAreaBounds.Max, KINDA_SMALL_NUMBER));
 
 	MassSubsystem->Tick(0.1f);
 	MassSubsystem->Tick(0.1f);

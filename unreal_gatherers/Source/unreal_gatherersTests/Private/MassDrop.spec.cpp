@@ -1,7 +1,9 @@
 #include "Actors/Ant.h"
 #include "Actors/Food.h"
 #include "Editor.h"
+#include "Math/RandomStream.h"
 #include "Misc/AutomationTest.h"
+#include "Simulation/GatherersAntSimulation.h"
 #include "Simulation/GatherersMassSubsystem.h"
 #include "Simulation/GatherersSpawnPlan.h"
 #include "Simulation/GatherersWorldSpawner.h"
@@ -33,12 +35,20 @@ bool FGatherersMassDropAutomationTest::RunTest(const FString& Parameters)
 
 	FGatherersSpawnPlan Plan;
 	Plan.bUseFullSimulationMode = true;
-	Plan.bUseMassSimulation = true;
+	Plan.RandomSeedBase = 123;
 	Plan.PlayAreaBounds = FBox(FVector(-500.0f, -500.0f, -100.0f), FVector(500.0f, 500.0f, 100.0f));
 	Plan.AntSpawns.Add(FTransform(FVector::ZeroVector));
 	Plan.AntInitialDirections.Add(FVector(1.0f, 0.0f, 0.0f));
+
+	FRandomStream RandomStream(Plan.RandomSeedBase);
+	const FVector FirstTurnDirection = ComputeAntTurnDirection(
+		FVector(1.0f, 0.0f, 0.0f),
+		RandomStream.FRandRange(-1.0f, 1.0f),
+		PI / 2.0f);
+	const FVector ExpectedDropLocation = FVector(10.0f, 0.0f, 0.0f) + FirstTurnDirection * 10.0f;
+
 	Plan.FoodSpawns.Add(FTransform(FVector(8.0f, 0.0f, 0.0f)));
-	Plan.FoodSpawns.Add(FTransform(FVector(26.0f, 0.0f, 0.0f)));
+	Plan.FoodSpawns.Add(FTransform(ExpectedDropLocation));
 
 	const FGatherersSpawnResult Result = SpawnGatherersActors(*World, Plan);
 	TestEqual(TEXT("spawned ant proxies"), Result.Ants.Num(), 1);
@@ -54,7 +64,7 @@ bool FGatherersMassDropAutomationTest::RunTest(const FString& Parameters)
 
 	TestTrue(TEXT("first food should be loose again after the drop"), Result.Foods[0]->GetAttachParentActor() == nullptr);
 	TestTrue(TEXT("second food should stay loose in the world"), Result.Foods[1]->GetAttachParentActor() == nullptr);
-	TestTrue(TEXT("dropped food should appear at the ant drop location"), Result.Foods[0]->GetActorLocation().Equals(FVector(20.0f, 0.0f, 0.0f), 1.0f));
+	TestTrue(TEXT("dropped food should appear at the deterministic turn-based drop location"), Result.Foods[0]->GetActorLocation().Equals(ExpectedDropLocation, 1.0f));
 
 	Result.Ants[0]->Destroy();
 	Result.Foods[0]->Destroy();

@@ -4,8 +4,6 @@
 #include "GameFramework/Actor.h"
 #include "Ant.generated.h"
 
-class AFood;
-
 UCLASS()
 class UNREAL_GATHERERS_API AAnt : public AActor
 {
@@ -13,24 +11,4 @@ class UNREAL_GATHERERS_API AAnt : public AActor
 
 public:
 	AAnt();
-	virtual void Tick(float DeltaSeconds) override;
-	void ConfigureForFullSimulation(const FVector& InitialDirection, const FBox& PlayAreaBounds, int32 RandomSeed);
-	void SetFullSimulationTurnJitterRadians(float InTurnJitterRadians);
-	void SetFullSimulationMovementSpeed(float InMovementSpeed);
-
-private:
-	AFood* FindClosestLooseFood() const;
-	AFood* FindLooseFoodInPickupRadius() const;
-	bool IsCarryingFood() const;
-	void PickUpFood(AFood& Food);
-	void DropFood();
-
-	bool bUseFullSimulationMode = false;
-	FVector MovementDirection = FVector(1.0f, 0.0f, 0.0f);
-	FBox FullSimulationBounds = FBox(EForceInit::ForceInit);
-	TObjectPtr<AFood> CarriedFood = nullptr;
-	float PickupCooldownRemainingSeconds = 0.0f;
-	float FullSimulationMovementSpeed = 100.0f;
-	float FullSimulationTurnJitterRadians = PI / 2.0f;
-	FRandomStream FullSimulationRandomStream;
 };

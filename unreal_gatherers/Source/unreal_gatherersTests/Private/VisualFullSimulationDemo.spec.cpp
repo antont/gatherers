@@ -6,6 +6,7 @@
 #include "LevelEditorViewport.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/PackageName.h"
+#include "Simulation/GatherersMassSubsystem.h"
 #include "Simulation/GatherersSpawnPlan.h"
 #include "Simulation/GatherersWorldSpawner.h"
 
@@ -60,6 +61,20 @@ public:
 
 	virtual bool Update() override
 	{
+		UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+		Test->TestNotNull(TEXT("visual full-sim editor world should exist"), World);
+		if (World == nullptr)
+		{
+			return true;
+		}
+
+		UGatherersMassSubsystem* MassSubsystem = World->GetSubsystem<UGatherersMassSubsystem>();
+		Test->TestNotNull(TEXT("visual full-sim editor world should expose the gatherers Mass subsystem"), MassSubsystem);
+		if (MassSubsystem == nullptr)
+		{
+			return true;
+		}
+
 		Test->TestNotNull(TEXT("visual full-sim ant should remain valid"), Ant);
 		if (Ant == nullptr)
 		{
@@ -98,7 +113,7 @@ public:
 			return false;
 		}
 
-		Ant->Tick(VisualStepSeconds);
+		MassSubsystem->Tick(VisualStepSeconds);
 		LastStepTimeSeconds = NowSeconds;
 		return false;
 	}
@@ -136,6 +151,15 @@ bool FGatherersVisualFullSimulationAutomationTest::RunTest(const FString& Parame
 		return false;
 	}
 
+	UGatherersMassSubsystem* MassSubsystem = World->GetSubsystem<UGatherersMassSubsystem>();
+	TestNotNull(TEXT("editor world should expose the gatherers Mass subsystem"), MassSubsystem);
+	if (MassSubsystem == nullptr)
+	{
+		return false;
+	}
+
+	MassSubsystem->ResetSimulation();
+
 	const FGatherersSpawnPlan Plan = BuildFullSimulationVisualSpawnPlan();
 	const FGatherersSpawnResult Result = SpawnGatherersActors(*World, Plan);
 	TestEqual(TEXT("full-sim visual spawned ant count"), Result.Ants.Num(), 1);
@@ -146,7 +170,6 @@ bool FGatherersVisualFullSimulationAutomationTest::RunTest(const FString& Parame
 		return false;
 	}
 
-	Result.Ants[0]->SetFullSimulationTurnJitterRadians(0.0f);
 	FrameVisualFullSimulationInViewport(Plan);
 	ADD_LATENT_AUTOMATION_COMMAND(FGatherersAdvanceVisibleFullSimulationCommand(this, Result.Ants[0], Result.Foods));
 	return true;

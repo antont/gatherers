@@ -33,7 +33,6 @@ bool FGatherersMassHeadingMovementAutomationTest::RunTest(const FString& Paramet
 
 	FGatherersSpawnPlan Plan;
 	Plan.bUseFullSimulationMode = true;
-	Plan.bUseMassSimulation = true;
 	Plan.PlayAreaBounds = FBox(FVector(-500.0f, -500.0f, -100.0f), FVector(500.0f, 500.0f, 100.0f));
 	Plan.AntSpawns.Add(FTransform(FVector::ZeroVector));
 	Plan.AntInitialDirections.Add(FVector(1.0f, 0.0f, 0.0f));

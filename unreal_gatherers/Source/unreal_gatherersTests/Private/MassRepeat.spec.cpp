@@ -1,7 +1,9 @@
 #include "Actors/Ant.h"
 #include "Actors/Food.h"
 #include "Editor.h"
+#include "Math/RandomStream.h"
 #include "Misc/AutomationTest.h"
+#include "Simulation/GatherersAntSimulation.h"
 #include "Simulation/GatherersMassSubsystem.h"
 #include "Simulation/GatherersSpawnPlan.h"
 #include "Simulation/GatherersWorldSpawner.h"
@@ -33,13 +35,26 @@ bool FGatherersMassRepeatAutomationTest::RunTest(const FString& Parameters)
 
 	FGatherersSpawnPlan Plan;
 	Plan.bUseFullSimulationMode = true;
-	Plan.bUseMassSimulation = true;
+	Plan.RandomSeedBase = 123;
 	Plan.PlayAreaBounds = FBox(FVector(-500.0f, -500.0f, -100.0f), FVector(500.0f, 500.0f, 100.0f));
 	Plan.AntSpawns.Add(FTransform(FVector::ZeroVector));
 	Plan.AntInitialDirections.Add(FVector(1.0f, 0.0f, 0.0f));
+
+	FRandomStream RandomStream(Plan.RandomSeedBase);
+	const FVector FirstTurnDirection = ComputeAntTurnDirection(
+		FVector(1.0f, 0.0f, 0.0f),
+		RandomStream.FRandRange(-1.0f, 1.0f),
+		PI / 2.0f);
+	const FVector DropLocation = FVector(10.0f, 0.0f, 0.0f) + FirstTurnDirection * 10.0f;
+	const FVector SecondTurnDirection = ComputeAntTurnDirection(
+		FirstTurnDirection,
+		RandomStream.FRandRange(-1.0f, 1.0f),
+		PI / 2.0f);
+	const FVector RepeatPickupLocation = DropLocation + SecondTurnDirection * 50.0f;
+
 	Plan.FoodSpawns.Add(FTransform(FVector(8.0f, 0.0f, 0.0f)));
-	Plan.FoodSpawns.Add(FTransform(FVector(65.0f, 0.0f, 0.0f)));
-	Plan.FoodSpawns.Add(FTransform(FVector(108.0f, 0.0f, 0.0f)));
+	Plan.FoodSpawns.Add(FTransform(DropLocation));
+	Plan.FoodSpawns.Add(FTransform(RepeatPickupLocation));
 
 	const FGatherersSpawnResult Result = SpawnGatherersActors(*World, Plan);
 	TestEqual(TEXT("spawned ant proxies"), Result.Ants.Num(), 1);
@@ -50,7 +65,7 @@ bool FGatherersMassRepeatAutomationTest::RunTest(const FString& Parameters)
 		return false;
 	}
 
-	for (int32 StepIndex = 0; StepIndex < 11; ++StepIndex)
+	for (int32 StepIndex = 0; StepIndex < 8; ++StepIndex)
 	{
 		MassSubsystem->Tick(0.1f);
 	}

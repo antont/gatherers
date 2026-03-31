@@ -2,6 +2,7 @@
 
 #include "Actors/Ant.h"
 #include "Actors/Food.h"
+#include "Math/RandomStream.h"
 #include "MassEntityManager.h"
 #include "MassEntitySubsystem.h"
 #include "MassEntityView.h"
@@ -46,6 +47,17 @@ FGatherersMassFoodFragment* FindLooseFoodInPickupRadius(
 	OutFoodEntity.Reset();
 	return nullptr;
 }
+
+FVector ConsumeAntTurnDirection(FGatherersMassAntFragment& AntFragment)
+{
+	FRandomStream RandomStream(AntFragment.RandomSeed);
+	const FVector TurnDirection = ComputeAntTurnDirection(
+		AntFragment.Direction,
+		RandomStream.FRandRange(-1.0f, 1.0f),
+		AntFragment.TurnJitterRadians);
+	AntFragment.RandomSeed = RandomStream.GetCurrentSeed();
+	return TurnDirection;
+}
 }
 
 void UGatherersMassSubsystem::Tick(float DeltaTime)
@@ -89,28 +101,28 @@ void UGatherersMassSubsystem::Tick(float DeltaTime)
 			18.0f,
 			DeltaTime);
 
-		if (AntFragment.PlayAreaBounds.IsValid)
+		if (SimulationBounds.IsValid)
 		{
 			FVector InwardBoundaryNormal = FVector::ZeroVector;
-			if (AntFragment.Position.X < AntFragment.PlayAreaBounds.Min.X)
+			if (AntFragment.Position.X < SimulationBounds.Min.X)
 			{
-				AntFragment.Position.X = AntFragment.PlayAreaBounds.Min.X;
+				AntFragment.Position.X = SimulationBounds.Min.X;
 				InwardBoundaryNormal += FVector(1.0f, 0.0f, 0.0f);
 			}
-			else if (AntFragment.Position.X > AntFragment.PlayAreaBounds.Max.X)
+			else if (AntFragment.Position.X > SimulationBounds.Max.X)
 			{
-				AntFragment.Position.X = AntFragment.PlayAreaBounds.Max.X;
+				AntFragment.Position.X = SimulationBounds.Max.X;
 				InwardBoundaryNormal += FVector(-1.0f, 0.0f, 0.0f);
 			}
 
-			if (AntFragment.Position.Y < AntFragment.PlayAreaBounds.Min.Y)
+			if (AntFragment.Position.Y < SimulationBounds.Min.Y)
 			{
-				AntFragment.Position.Y = AntFragment.PlayAreaBounds.Min.Y;
+				AntFragment.Position.Y = SimulationBounds.Min.Y;
 				InwardBoundaryNormal += FVector(0.0f, 1.0f, 0.0f);
 			}
-			else if (AntFragment.Position.Y > AntFragment.PlayAreaBounds.Max.Y)
+			else if (AntFragment.Position.Y > SimulationBounds.Max.Y)
 			{
-				AntFragment.Position.Y = AntFragment.PlayAreaBounds.Max.Y;
+				AntFragment.Position.Y = SimulationBounds.Max.Y;
 				InwardBoundaryNormal += FVector(0.0f, -1.0f, 0.0f);
 			}
 
@@ -129,6 +141,8 @@ void UGatherersMassSubsystem::Tick(float DeltaTime)
 
 		if (AntFragment.CarriedFoodEntity.IsValid() && NearbyFood != nullptr)
 		{
+			AntFragment.Direction = ConsumeAntTurnDirection(AntFragment);
+
 			if (EntityManager.IsEntityValid(AntFragment.CarriedFoodEntity))
 			{
 				FMassEntityView CarriedFoodView(EntityManager, AntFragment.CarriedFoodEntity);
@@ -152,6 +166,7 @@ void UGatherersMassSubsystem::Tick(float DeltaTime)
 		{
 			if (NearbyFood != nullptr)
 			{
+				AntFragment.Direction = ConsumeAntTurnDirection(AntFragment);
 				AntFragment.CarriedFoodEntity = NearbyFoodEntity;
 				NearbyFood->bIsLoose = false;
 			}
@@ -197,6 +212,7 @@ void UGatherersMassSubsystem::InitializeHybridSimulation(const FGatherersSpawnRe
 	}
 
 	FMassEntityManager& EntityManager = MassEntitySubsystem->GetMutableEntityManager();
+	SimulationBounds = Plan.PlayAreaBounds;
 
 	for (AFood* FoodProxy : SpawnResult.Foods)
 	{
@@ -232,9 +248,10 @@ void UGatherersMassSubsystem::InitializeHybridSimulation(const FGatherersSpawnRe
 			AntFragment.Direction = FVector(1.0f, 0.0f, 0.0f);
 		}
 
-		AntFragment.PlayAreaBounds = Plan.PlayAreaBounds;
 		AntFragment.ProxyActor = AntProxy;
 		AntFragment.RandomSeed = Plan.RandomSeedBase + AntIndex;
+		AntFragment.MovementSpeed = FMath::Max(0.0f, Plan.FullSimulationMovementSpeed);
+		AntFragment.TurnJitterRadians = FMath::Max(0.0f, Plan.FullSimulationTurnJitterRadians);
 
 		TArray<FInstancedStruct, TInlineAllocator<1>> AntFragments;
 		AntFragments.Add(FInstancedStruct::Make(AntFragment));
@@ -280,6 +297,7 @@ void UGatherersMassSubsystem::ResetSimulation()
 
 	ManagedAntEntities.Reset();
 	ManagedFoodEntities.Reset();
+	SimulationBounds = FBox(EForceInit::ForceInit);
 }
 
 int32 UGatherersMassSubsystem::GetManagedAntCount() const
@@ -295,4 +313,9 @@ int32 UGatherersMassSubsystem::GetManagedFoodCount() const
 bool UGatherersMassSubsystem::HasManagedSimulation() const
 {
 	return ManagedAntEntities.Num() > 0 || ManagedFoodEntities.Num() > 0;
+}
+
+const FBox& UGatherersMassSubsystem::GetSimulationBounds() const
+{
+	return SimulationBounds;
 }

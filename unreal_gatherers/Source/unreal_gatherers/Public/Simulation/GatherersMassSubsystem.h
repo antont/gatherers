@@ -31,7 +31,6 @@ struct UNREAL_GATHERERS_API FGatherersMassAntFragment : public FMassFragment
 
 	FVector Position = FVector::ZeroVector;
 	FVector Direction = FVector(1.0f, 0.0f, 0.0f);
-	FBox PlayAreaBounds = FBox(EForceInit::ForceInit);
 	FMassEntityHandle CarriedFoodEntity;
 	TWeakObjectPtr<AAnt> ProxyActor = nullptr;
 	float PickupCooldownRemainingSeconds = 0.0f;
@@ -65,7 +64,9 @@ public:
 	int32 GetManagedAntCount() const;
 	int32 GetManagedFoodCount() const;
 	bool HasManagedSimulation() const;
+	const FBox& GetSimulationBounds() const;
 
 	TArray<FMassEntityHandle> ManagedAntEntities;
 	TArray<FMassEntityHandle> ManagedFoodEntities;
+	FBox SimulationBounds = FBox(EForceInit::ForceInit);
 };

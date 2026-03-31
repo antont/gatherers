@@ -1,28 +1,5 @@
 #include "Simulation/GatherersAntSimulation.h"
 
-FVector ComputeAntNextLocation(
-	const FVector& CurrentLocation,
-	const FVector& FoodLocation,
-	float MovementSpeed,
-	float DeltaSeconds)
-{
-	const FVector ToFood = FoodLocation - CurrentLocation;
-	const float MaxStepDistance = FMath::Max(0.0f, MovementSpeed) * FMath::Max(0.0f, DeltaSeconds);
-	const float DistanceToFood = ToFood.Length();
-
-	if (DistanceToFood <= KINDA_SMALL_NUMBER || MaxStepDistance <= 0.0f)
-	{
-		return CurrentLocation;
-	}
-
-	if (DistanceToFood <= MaxStepDistance)
-	{
-		return FoodLocation;
-	}
-
-	return CurrentLocation + ToFood.GetSafeNormal() * MaxStepDistance;
-}
-
 FVector ComputeAntHeadingMovementStep(
 	const FVector& CurrentLocation,
 	const FVector& HeadingDirection,
@@ -72,32 +49,6 @@ FVector ComputeAntTurnDirection(
 {
 	const float ClampedJitterAlpha = FMath::Clamp(NormalizedJitterAlpha, -1.0f, 1.0f);
 	return ComputeAntRetargetDirection(CurrentDirection, ClampedJitterAlpha * FMath::Max(0.0f, MaxTurnJitterRadians));
-}
-
-int32 FindClosestLooseFoodTargetIndex(
-	const FVector& AntLocation,
-	const TArray<FGatherersFoodTarget>& FoodTargets)
-{
-	int32 ClosestLooseFoodIndex = INDEX_NONE;
-	float ClosestDistanceSquared = TNumericLimits<float>::Max();
-
-	for (int32 FoodIndex = 0; FoodIndex < FoodTargets.Num(); ++FoodIndex)
-	{
-		const FGatherersFoodTarget& FoodTarget = FoodTargets[FoodIndex];
-		if (!FoodTarget.bIsLoose)
-		{
-			continue;
-		}
-
-		const float DistanceSquared = FVector::DistSquared(AntLocation, FoodTarget.Location);
-		if (DistanceSquared < ClosestDistanceSquared)
-		{
-			ClosestDistanceSquared = DistanceSquared;
-			ClosestLooseFoodIndex = FoodIndex;
-		}
-	}
-
-	return ClosestLooseFoodIndex;
 }
 
 float ComputeRemainingPickupCooldown(

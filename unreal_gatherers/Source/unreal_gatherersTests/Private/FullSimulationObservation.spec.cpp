@@ -2,21 +2,28 @@
 #include "Actors/Food.h"
 #include "Editor.h"
 #include "Misc/AutomationTest.h"
+#include "Simulation/GatherersMassSubsystem.h"
+#include "Simulation/GatherersSpawnPlan.h"
+#include "Simulation/GatherersWorldSpawner.h"
 
 namespace
 {
-TArray<AFood*> SpawnFoods(UWorld& World, std::initializer_list<FVector> Locations)
+UGatherersMassSubsystem* RequireMassSubsystem(FAutomationTestBase& Test, UWorld* World)
 {
-	TArray<AFood*> Foods;
-	for (const FVector& Location : Locations)
+	Test.TestNotNull(TEXT("editor world should exist"), World);
+	if (World == nullptr)
 	{
-		if (AFood* Food = World.SpawnActor<AFood>(AFood::StaticClass(), FTransform(Location)))
-		{
-			Foods.Add(Food);
-		}
+		return nullptr;
 	}
 
-	return Foods;
+	UGatherersMassSubsystem* MassSubsystem = World->GetSubsystem<UGatherersMassSubsystem>();
+	Test.TestNotNull(TEXT("gatherers Mass subsystem should exist"), MassSubsystem);
+	if (MassSubsystem != nullptr)
+	{
+		MassSubsystem->ResetSimulation();
+	}
+
+	return MassSubsystem;
 }
 
 int32 CountAttachedFoods(const TArray<AFood*>& Foods)
@@ -32,107 +39,124 @@ int32 CountAttachedFoods(const TArray<AFood*>& Foods)
 
 	return AttachedFoodCount;
 }
+
+void DestroySpawnedActors(const FGatherersSpawnResult& Result)
+{
+	for (AAnt* Ant : Result.Ants)
+	{
+		if (Ant != nullptr)
+		{
+			Ant->Destroy();
+		}
+	}
+
+	for (AFood* Food : Result.Foods)
+	{
+		if (Food != nullptr)
+		{
+			Food->Destroy();
+		}
+	}
+}
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FGatherersFullSimulationFirstDropAutomationTest,
-	"default.unreal_gatherers.FullSimulation.FirstDropLeavesFoodLooseAndPreservesFoodCount",
+	"default.unreal_gatherers.FullSimulationActorFixture.FirstDropLeavesFoodLooseAndPreservesFoodCount",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FGatherersFullSimulationFirstDropAutomationTest::RunTest(const FString& Parameters)
 {
 	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
-	TestNotNull(TEXT("editor world should exist"), World);
-
-	if (World == nullptr)
+	UGatherersMassSubsystem* MassSubsystem = RequireMassSubsystem(*this, World);
+	if (MassSubsystem == nullptr)
 	{
 		return false;
 	}
 
-	AAnt* Ant = World->SpawnActor<AAnt>(AAnt::StaticClass(), FTransform(FVector::ZeroVector));
-	TArray<AFood*> Foods = SpawnFoods(*World, {FVector(8.0f, 0.0f, 0.0f), FVector(-10.0f, 0.0f, 0.0f), FVector(50.0f, 0.0f, 0.0f)});
-	TestNotNull(TEXT("full-sim observation ant should spawn"), Ant);
-	TestEqual(TEXT("full-sim observation food count"), Foods.Num(), 3);
+	FGatherersSpawnPlan Plan;
+	Plan.bUseFullSimulationMode = true;
+	Plan.PlayAreaBounds = FBox(FVector(-100.0f, -100.0f, -100.0f), FVector(100.0f, 100.0f, 100.0f));
+	Plan.RandomSeedBase = 123;
+	Plan.FullSimulationTurnJitterRadians = 0.0f;
+	Plan.AntSpawns.Add(FTransform(FVector::ZeroVector));
+	Plan.AntInitialDirections.Add(FVector(1.0f, 0.0f, 0.0f));
+	Plan.FoodSpawns.Add(FTransform(FVector(8.0f, 0.0f, 0.0f)));
+	Plan.FoodSpawns.Add(FTransform(FVector(-10.0f, 0.0f, 0.0f)));
+	Plan.FoodSpawns.Add(FTransform(FVector(50.0f, 0.0f, 0.0f)));
 
-	if (Ant == nullptr || Foods.Num() != 3)
+	const FGatherersSpawnResult Result = SpawnGatherersActors(*World, Plan);
+	TestEqual(TEXT("full-sim observation ant count"), Result.Ants.Num(), 1);
+	TestEqual(TEXT("full-sim observation food count"), Result.Foods.Num(), 3);
+
+	if (Result.Ants.Num() != 1 || Result.Foods.Num() != 3)
 	{
 		return false;
 	}
 
-	Ant->ConfigureForFullSimulation(FVector(1.0f, 0.0f, 0.0f), FBox(FVector(-100.0f, -100.0f, -100.0f), FVector(100.0f, 100.0f, 100.0f)), 123);
-	Ant->SetFullSimulationTurnJitterRadians(0.0f);
+	MassSubsystem->Tick(0.1f);
+	MassSubsystem->Tick(0.1f);
 
-	Ant->Tick(0.1f);
-	Ant->Tick(0.1f);
-
-	TestEqual(TEXT("food count stays constant after pickup then first drop"), Foods.Num(), 3);
-	TestEqual(TEXT("first drop leaves all food loose again"), CountAttachedFoods(Foods), 0);
+	TestEqual(TEXT("food count stays constant after pickup then first drop"), Result.Foods.Num(), 3);
+	TestEqual(TEXT("first drop leaves all food loose again"), CountAttachedFoods(Result.Foods), 0);
 	TestTrue(
 		TEXT("one loose food stays near the ant after the first drop"),
-		Foods[0]->GetActorLocation().Equals(Ant->GetActorLocation(), 1.0f));
+		Result.Foods[0]->GetActorLocation().Equals(Result.Ants[0]->GetActorLocation(), 1.0f));
 
-	Ant->Destroy();
-	for (AFood* Food : Foods)
-	{
-		if (Food != nullptr)
-		{
-			Food->Destroy();
-		}
-	}
-
+	DestroySpawnedActors(Result);
+	MassSubsystem->ResetSimulation();
 	return true;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FGatherersFullSimulationCooldownAutomationTest,
-	"default.unreal_gatherers.FullSimulation.CooldownBlocksImmediateRepickupAndAllowsLaterPickup",
+	"default.unreal_gatherers.FullSimulationActorFixture.CooldownBlocksImmediateRepickupAndAllowsLaterPickup",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FGatherersFullSimulationCooldownAutomationTest::RunTest(const FString& Parameters)
 {
 	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
-	TestNotNull(TEXT("editor world should exist"), World);
-
-	if (World == nullptr)
+	UGatherersMassSubsystem* MassSubsystem = RequireMassSubsystem(*this, World);
+	if (MassSubsystem == nullptr)
 	{
 		return false;
 	}
 
-	AAnt* Ant = World->SpawnActor<AAnt>(AAnt::StaticClass(), FTransform(FVector::ZeroVector));
-	TArray<AFood*> Foods = SpawnFoods(*World, {FVector(8.0f, 0.0f, 0.0f), FVector(-10.0f, 0.0f, 0.0f), FVector(50.0f, 0.0f, 0.0f)});
-	TestNotNull(TEXT("full-sim cooldown ant should spawn"), Ant);
-	TestEqual(TEXT("full-sim cooldown food count"), Foods.Num(), 3);
+	FGatherersSpawnPlan Plan;
+	Plan.bUseFullSimulationMode = true;
+	Plan.PlayAreaBounds = FBox(FVector(-100.0f, -100.0f, -100.0f), FVector(100.0f, 100.0f, 100.0f));
+	Plan.RandomSeedBase = 123;
+	Plan.FullSimulationTurnJitterRadians = 0.0f;
+	Plan.AntSpawns.Add(FTransform(FVector::ZeroVector));
+	Plan.AntInitialDirections.Add(FVector(1.0f, 0.0f, 0.0f));
+	Plan.FoodSpawns.Add(FTransform(FVector(8.0f, 0.0f, 0.0f)));
+	Plan.FoodSpawns.Add(FTransform(FVector(-10.0f, 0.0f, 0.0f)));
+	Plan.FoodSpawns.Add(FTransform(FVector(50.0f, 0.0f, 0.0f)));
 
-	if (Ant == nullptr || Foods.Num() != 3)
+	const FGatherersSpawnResult Result = SpawnGatherersActors(*World, Plan);
+	TestEqual(TEXT("full-sim cooldown ant count"), Result.Ants.Num(), 1);
+	TestEqual(TEXT("full-sim cooldown food count"), Result.Foods.Num(), 3);
+
+	if (Result.Ants.Num() != 1 || Result.Foods.Num() != 3)
 	{
 		return false;
 	}
-
-	Ant->ConfigureForFullSimulation(FVector(1.0f, 0.0f, 0.0f), FBox(FVector(-100.0f, -100.0f, -100.0f), FVector(100.0f, 100.0f, 100.0f)), 123);
-	Ant->SetFullSimulationTurnJitterRadians(0.0f);
 
 	for (int32 StepIndex = 0; StepIndex < 3; ++StepIndex)
 	{
-		Ant->Tick(0.1f);
+		MassSubsystem->Tick(0.1f);
 	}
 
-	TestEqual(TEXT("cooldown blocks immediate re-pickup right after the first drop"), CountAttachedFoods(Foods), 0);
+	TestEqual(TEXT("cooldown blocks immediate re-pickup right after the first drop"), CountAttachedFoods(Result.Foods), 0);
 
 	for (int32 StepIndex = 0; StepIndex < 5; ++StepIndex)
 	{
-		Ant->Tick(0.1f);
+		MassSubsystem->Tick(0.1f);
 	}
 
-	TestEqual(TEXT("after cooldown the ant can gather again"), CountAttachedFoods(Foods), 1);
+	TestEqual(TEXT("after cooldown the ant can gather again"), CountAttachedFoods(Result.Foods), 1);
 
-	Ant->Destroy();
-	for (AFood* Food : Foods)
-	{
-		if (Food != nullptr)
-		{
-			Food->Destroy();
-		}
-	}
-
+	DestroySpawnedActors(Result);
+	MassSubsystem->ResetSimulation();
 	return true;
 }

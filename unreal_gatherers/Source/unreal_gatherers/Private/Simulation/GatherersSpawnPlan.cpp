@@ -13,7 +13,12 @@ constexpr float SpawnZ = 50.0f;
 FGatherersSpawnPlan BuildInitialGatherersSpawnPlan()
 {
 	FGatherersSpawnPlan Plan;
+	Plan.bUseFullSimulationMode = true;
+	Plan.PlayAreaBounds = FBox(FVector(-500.0f, -500.0f, -100.0f), FVector(500.0f, 500.0f, 100.0f));
+	Plan.RandomSeedBase = 123;
+	Plan.FullSimulationTurnJitterRadians = 0.0f;
 	Plan.AntSpawns.Add(FTransform(FVector(0.0f, 0.0f, 50.0f)));
+	Plan.AntInitialDirections.Add(FVector(1.0f, 0.0f, 0.0f));
 	Plan.FoodSpawns.Add(FTransform(FVector(200.0f, 0.0f, 50.0f)));
 	Plan.FoodSpawns.Add(FTransform(FVector(-200.0f, 0.0f, 50.0f)));
 	return Plan;
@@ -25,7 +30,6 @@ FGatherersSpawnPlan BuildDefaultGameFullSimulationSpawnPlan(
 {
 	FGatherersSpawnPlan Plan;
 	Plan.bUseFullSimulationMode = true;
-	Plan.bUseMassSimulation = true;
 	Plan.PlayAreaBounds = PlayAreaBounds;
 	Plan.RandomSeedBase = RandomSeed;
 
@@ -104,6 +108,7 @@ FGatherersSpawnPlan BuildFullSimulationVisualSpawnPlan()
 	Plan.bUseFullSimulationMode = true;
 	Plan.PlayAreaBounds = FBox(FVector(-120.0f, -100.0f, -100.0f), FVector(120.0f, 100.0f, 100.0f));
 	Plan.RandomSeedBase = 123;
+	Plan.FullSimulationTurnJitterRadians = 0.0f;
 	Plan.AntSpawns.Add(FTransform(FVector::ZeroVector));
 	Plan.AntInitialDirections.Add(FVector(1.0f, 0.0f, 0.0f));
 	Plan.FoodSpawns.Add(FTransform(FVector(8.0f, 0.0f, 0.0f)));

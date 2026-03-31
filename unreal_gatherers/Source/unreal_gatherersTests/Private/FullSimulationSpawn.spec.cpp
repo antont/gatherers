@@ -3,6 +3,7 @@
 #include "Actors/Food.h"
 #include "Editor.h"
 #include "Misc/AutomationTest.h"
+#include "Simulation/GatherersMassSubsystem.h"
 #include "Simulation/GatherersSpawnPlan.h"
 #include "Simulation/GatherersWorldSpawner.h"
 
@@ -48,6 +49,16 @@ bool FGatherersFullSimulationSpawnerAutomationTest::RunTest(const FString& Param
 	Plan.AntInitialDirections.Add(FVector(1.0f, 0.0f, 0.0f));
 	Plan.FoodSpawns.Add(FTransform(FVector(0.0f, 200.0f, 0.0f)));
 
+	UGatherersMassSubsystem* MassSubsystem = World->GetSubsystem<UGatherersMassSubsystem>();
+	TestNotNull(TEXT("gatherers Mass subsystem should exist"), MassSubsystem);
+
+	if (MassSubsystem == nullptr)
+	{
+		return false;
+	}
+
+	MassSubsystem->ResetSimulation();
+
 	const FGatherersSpawnResult Result = SpawnGatherersActors(*World, Plan);
 	TestEqual(TEXT("full-sim spawned ant count"), Result.Ants.Num(), 1);
 	TestEqual(TEXT("full-sim spawned food count"), Result.Foods.Num(), 1);
@@ -59,14 +70,15 @@ bool FGatherersFullSimulationSpawnerAutomationTest::RunTest(const FString& Param
 
 	for (int32 StepIndex = 0; StepIndex < 5; ++StepIndex)
 	{
-		Result.Ants[0]->Tick(0.1f);
+		MassSubsystem->Tick(0.1f);
 	}
 
 	TestTrue(
-		TEXT("world spawner configures spawned ant for full-sim heading movement instead of food seeking"),
+		TEXT("world spawner routes spawned full-sim ant through Mass-backed heading movement instead of actor food seeking"),
 		Result.Ants[0]->GetActorLocation().Equals(FVector(50.0f, 0.0f, 0.0f), 1.0f));
 
 	Result.Ants[0]->Destroy();
 	Result.Foods[0]->Destroy();
+	MassSubsystem->ResetSimulation();
 	return true;
 }

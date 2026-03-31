@@ -6,6 +6,7 @@
 #include "LevelEditorViewport.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/PackageName.h"
+#include "Simulation/GatherersMassSubsystem.h"
 #include "Simulation/GatherersSpawnPlan.h"
 #include "Simulation/GatherersWorldSpawner.h"
 #include "TestLogic/GatherersWorldAssertions.h"
@@ -62,6 +63,13 @@ public:
 			return true;
 		}
 
+		UGatherersMassSubsystem* MassSubsystem = World->GetSubsystem<UGatherersMassSubsystem>();
+		Test->TestNotNull(TEXT("visual editor world should expose the gatherers Mass subsystem"), MassSubsystem);
+		if (MassSubsystem == nullptr)
+		{
+			return true;
+		}
+
 		const FGatherersSpawnPlan Plan = BuildInitialGatherersSpawnPlan();
 		const GatherersWorldAssertions::FObservedWorldState WorldState = GatherersWorldAssertions::Observe(World);
 		AFood* AttachedFood = WorldState.GetFirstAttachedFood();
@@ -88,11 +96,7 @@ public:
 			return false;
 		}
 
-		if (AAnt* Ant = WorldState.GetSingleAnt())
-		{
-			Ant->Tick(VisualStepSeconds);
-		}
-
+		MassSubsystem->Tick(VisualStepSeconds);
 		LastStepTimeSeconds = NowSeconds;
 		return false;
 	}
@@ -127,6 +131,15 @@ bool FGatherersVisualPickupAutomationTest::RunTest(const FString& Parameters)
 	{
 		return false;
 	}
+
+	UGatherersMassSubsystem* MassSubsystem = World->GetSubsystem<UGatherersMassSubsystem>();
+	TestNotNull(TEXT("editor world should expose the gatherers Mass subsystem"), MassSubsystem);
+	if (MassSubsystem == nullptr)
+	{
+		return false;
+	}
+
+	MassSubsystem->ResetSimulation();
 
 	const FGatherersSpawnPlan Plan = BuildInitialGatherersSpawnPlan();
 	const FGatherersSpawnResult Result = SpawnGatherersActors(*World, Plan);

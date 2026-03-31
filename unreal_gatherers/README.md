@@ -9,8 +9,8 @@ Current implemented slice:
 - editor-only automation test module
 - random full-simulation game startup path with Rust-like ant row spacing and food count, now backed by Mass-managed sim state with actor proxies
 - preserved deterministic gather-demo path with one ant and two foods for explicit test/manual fixtures
-- preserved actor-backed full-simulation fixture path for comparison and regression tests
-- separate Mass-backed full-simulation path with heading-based movement, pickup/drop, cooldown, repeated gathering, and border turn-back
+- preserved direct-actor full-simulation fixture specs for comparison and regression coverage
+- Mass-backed full-simulation runtime with heading-based movement, pickup/drop, cooldown, repeated gathering, and border turn-back
 - startup integration through `Aunreal_gatherersGameModeBase`
 - standalone `-game` launch into `SimBlank`
 - separate visual/manual editor inspection paths for the deterministic demo and the new full simulation
@@ -58,6 +58,7 @@ Useful targeted reruns:
 -ExecCmds="Automation RunTest default.unreal_gatherers.Simulation.AntDropsFoodBackIntoWorld;Quit"
 -ExecCmds="Automation RunTest default.unreal_gatherers.Simulation.AntDropsFoodTwiceInSameEditorSession;Quit"
 -ExecCmds="Automation RunTest default.unreal_gatherers.FullSimulation;Quit"
+-ExecCmds="Automation RunTest default.unreal_gatherers.FullSimulationActorFixture;Quit"
 -ExecCmds="Automation RunTest default.unreal_gatherers.Mass;Quit"
 -ExecCmds="Automation RunTest supplemental.unreal_gatherers.Spawning.StartupSmokeSpawnsRustLikeFullSimulationCounts;Quit"
 ```
@@ -110,4 +111,4 @@ and spawn the random full-simulation path by default:
 - random initial headings for those ants
 - Mass-managed ant/food simulation state synchronized into the spawned actors
 
-The old one-ant/two-food deterministic setup is still preserved, and the actor-backed full-simulation fixtures are preserved too, but only when a test or manual harness explicitly asks for those non-Mass spawn builders.
+The old one-ant/two-food deterministic setup is still preserved, and the direct-actor full-simulation comparison specs are preserved too, but the live full-simulation runtime now means the Mass-backed path.

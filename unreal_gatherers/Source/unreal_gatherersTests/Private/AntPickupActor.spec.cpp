@@ -4,6 +4,7 @@
 #include "EngineUtils.h"
 #include "HAL/PlatformTime.h"
 #include "Misc/AutomationTest.h"
+#include "Simulation/GatherersMassSubsystem.h"
 #include "Simulation/GatherersSpawnPlan.h"
 #include "Simulation/GatherersWorldSpawner.h"
 #include "TestLogic/GatherersWorldAssertions.h"
@@ -46,6 +47,13 @@ public:
 			return true;
 		}
 
+		UGatherersMassSubsystem* MassSubsystem = World->GetSubsystem<UGatherersMassSubsystem>();
+		Test->TestNotNull(TEXT("simulation world should expose the gatherers Mass subsystem"), MassSubsystem);
+		if (MassSubsystem != nullptr)
+		{
+			MassSubsystem->ResetSimulation();
+		}
+
 		const GatherersWorldAssertions::FObservedWorldState ExistingWorldState = GatherersWorldAssertions::Observe(World);
 		for (AAnt* Ant : ExistingWorldState.Ants)
 		{
@@ -66,6 +74,11 @@ public:
 		const FGatherersSpawnResult SpawnResult = SpawnGatherersActors(*World, BuildInitialGatherersSpawnPlan());
 		Test->TestEqual(TEXT("deterministic simulation fixture ant count"), SpawnResult.Ants.Num(), 1);
 		Test->TestEqual(TEXT("deterministic simulation fixture food count"), SpawnResult.Foods.Num(), 2);
+		if (MassSubsystem != nullptr)
+		{
+			Test->TestEqual(TEXT("deterministic simulation fixture managed ant count"), MassSubsystem->GetManagedAntCount(), 1);
+			Test->TestEqual(TEXT("deterministic simulation fixture managed food count"), MassSubsystem->GetManagedFoodCount(), 2);
+		}
 		return true;
 	}
 

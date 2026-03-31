@@ -14,15 +14,6 @@ FGatherersSpawnResult SpawnGatherersActors(UWorld& World, const FGatherersSpawnP
 	{
 		if (AAnt* Ant = World.SpawnActor<AAnt>(AAnt::StaticClass(), SpawnTransform))
 		{
-			if (Plan.bUseFullSimulationMode)
-			{
-				const int32 SpawnIndex = Result.Ants.Num();
-				const FVector InitialDirection = Plan.AntInitialDirections.IsValidIndex(SpawnIndex)
-					? Plan.AntInitialDirections[SpawnIndex]
-					: FVector(1.0f, 0.0f, 0.0f);
-				Ant->ConfigureForFullSimulation(InitialDirection, Plan.PlayAreaBounds, Plan.RandomSeedBase + SpawnIndex);
-			}
-
 			Result.Ants.Add(Ant);
 		}
 	}
@@ -35,7 +26,7 @@ FGatherersSpawnResult SpawnGatherersActors(UWorld& World, const FGatherersSpawnP
 		}
 	}
 
-	if (Plan.bUseMassSimulation)
+	if (Plan.bUseFullSimulationMode)
 	{
 		if (UGatherersMassSubsystem* MassSubsystem = World.GetSubsystem<UGatherersMassSubsystem>())
 		{
