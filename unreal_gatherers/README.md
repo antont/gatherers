@@ -7,7 +7,8 @@ Unreal 5.7 port of the `gatherers` simulation.
 Current implemented slice:
 
 - editor-only automation test module
-- preserved deterministic gather-demo path with one ant and two foods
+- random full-simulation game startup path with Rust-like ant row spacing and food count
+- preserved deterministic gather-demo path with one ant and two foods for explicit test/manual fixtures
 - separate full-simulation path with heading-based movement, pickup/drop, cooldown, and border turn-back
 - startup integration through `Aunreal_gatherersGameModeBase`
 - standalone `-game` launch into `SimBlank`
@@ -56,7 +57,7 @@ Useful targeted reruns:
 -ExecCmds="Automation RunTest default.unreal_gatherers.Simulation.AntDropsFoodBackIntoWorld;Quit"
 -ExecCmds="Automation RunTest default.unreal_gatherers.Simulation.AntDropsFoodTwiceInSameEditorSession;Quit"
 -ExecCmds="Automation RunTest default.unreal_gatherers.FullSimulation;Quit"
--ExecCmds="Automation RunTest supplemental.unreal_gatherers.Spawning.StartupSmokeSpawnsOneAntAndTwoFoods;Quit"
+-ExecCmds="Automation RunTest supplemental.unreal_gatherers.Spawning.StartupSmokeSpawnsRustLikeFullSimulationCounts;Quit"
 ```
 
 ## Run the visual gather demos
@@ -100,4 +101,10 @@ The current startup path should load:
 - `/Game/SimBlank/Levels/SimBlank`
 - `unreal_gatherersGameModeBase`
 
-and spawn the preserved deterministic gather-demo path with one ant actor plus two food actors.
+and spawn the random full-simulation path by default:
+
+- 80 food actors at random positions
+- a Rust-like row of ants spaced 50 units apart across the play area
+- random initial headings for those ants
+
+The old one-ant/two-food deterministic setup is still preserved, but only when a test or manual harness explicitly asks for `BuildInitialGatherersSpawnPlan()`.
