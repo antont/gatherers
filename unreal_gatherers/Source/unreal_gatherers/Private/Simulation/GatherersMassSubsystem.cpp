@@ -14,6 +14,7 @@ namespace
 {
 constexpr float MassPickupRadius = 15.0f;
 constexpr float MassCarriedFoodHeight = 20.0f;
+constexpr float MassPickupSeparationDistance = 50.0f;
 
 FGatherersMassFoodFragment* FindLooseFoodInPickupRadius(
 	FMassEntityManager& EntityManager,
@@ -88,14 +89,37 @@ void UGatherersMassSubsystem::Tick(float DeltaTime)
 			18.0f,
 			DeltaTime);
 
-		if (!AntFragment.CarriedFoodEntity.IsValid() && AntFragment.PickupCooldownRemainingSeconds <= 0.0f)
+		FMassEntityHandle NearbyFoodEntity;
+		FGatherersMassFoodFragment* NearbyFood = FindLooseFoodInPickupRadius(
+			EntityManager,
+			ManagedFoodEntities,
+			AntFragment.Position,
+			NearbyFoodEntity);
+
+		if (AntFragment.CarriedFoodEntity.IsValid() && NearbyFood != nullptr)
 		{
-			FMassEntityHandle NearbyFoodEntity;
-			if (FGatherersMassFoodFragment* NearbyFood = FindLooseFoodInPickupRadius(
-				EntityManager,
-				ManagedFoodEntities,
-				AntFragment.Position,
-				NearbyFoodEntity))
+			if (EntityManager.IsEntityValid(AntFragment.CarriedFoodEntity))
+			{
+				FMassEntityView CarriedFoodView(EntityManager, AntFragment.CarriedFoodEntity);
+				FGatherersMassFoodFragment& CarriedFoodFragment = CarriedFoodView.GetFragmentData<FGatherersMassFoodFragment>();
+				CarriedFoodFragment.bIsLoose = true;
+				CarriedFoodFragment.Position = AntFragment.Position;
+
+				if (AFood* CarriedFoodProxy = CarriedFoodFragment.ProxyActor.Get())
+				{
+					CarriedFoodProxy->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
+					CarriedFoodProxy->SetActorLocation(AntFragment.Position);
+				}
+			}
+
+			AntFragment.CarriedFoodEntity.Reset();
+			AntFragment.PickupCooldownRemainingSeconds = ComputePickupCooldownForSeparationDistance(
+				MassPickupSeparationDistance,
+				AntFragment.MovementSpeed);
+		}
+		else if (!AntFragment.CarriedFoodEntity.IsValid() && AntFragment.PickupCooldownRemainingSeconds <= 0.0f)
+		{
+			if (NearbyFood != nullptr)
 			{
 				AntFragment.CarriedFoodEntity = NearbyFoodEntity;
 				NearbyFood->bIsLoose = false;
