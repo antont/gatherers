@@ -28,13 +28,25 @@ DEFINE_LATENT_AUTOMATION_COMMAND_THREE_PARAMETER(
 
 bool FGatherersWaitForStartupActorsCommand::Update()
 {
-	return GatherersWorldAssertions::PollForPickupState(
-		*Test,
-		GEditor ? GEditor->PlayWorld : nullptr,
-		BuildInitialGatherersSpawnPlan(),
-		StartTimeSeconds,
-		TimeoutSeconds,
-		TEXT("startup"));
+	UWorld* World = GEditor ? GEditor->PlayWorld : nullptr;
+	Test->TestNotNull(TEXT("startup world should exist"), World);
+	if (World == nullptr)
+	{
+		return true;
+	}
+
+	const GatherersWorldAssertions::FObservedWorldState WorldState = GatherersWorldAssertions::Observe(World);
+	if (WorldState.Ants.Num() != 26 || WorldState.Foods.Num() != 80)
+	{
+		if (FPlatformTime::Seconds() - StartTimeSeconds < TimeoutSeconds)
+		{
+			return false;
+		}
+	}
+
+	Test->TestEqual(TEXT("startup ant count"), WorldState.Ants.Num(), 26);
+	Test->TestEqual(TEXT("startup food count"), WorldState.Foods.Num(), 80);
+	return true;
 }
 
 bool FGatherersWaitForStartupPIECleanupCommand::Update()
@@ -49,7 +61,7 @@ bool FGatherersWaitForStartupPIECleanupCommand::Update()
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FGatherersStartupSmokeAutomationTest,
-	"supplemental.unreal_gatherers.Spawning.StartupSmokeSpawnsOneAntAndTwoFoods",
+	"supplemental.unreal_gatherers.Spawning.StartupSmokeSpawnsRustLikeFullSimulationCounts",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FGatherersStartupSmokeAutomationTest::RunTest(const FString& Parameters)
