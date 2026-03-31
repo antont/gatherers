@@ -11,7 +11,45 @@ const Cooldown = components.Cooldown;
 const Carrying = components.Carrying;
 const CarriedBy = components.CarriedBy;
 
-// --- Systems (to be implemented) ---
+// --- Movement System ---
+
+pub fn movementSystem(world: *ecs.world_t, settings: *const config.SimulationSettings, delta: f32) void {
+    const speed = settings.effectiveSpeed(delta);
+    const safe_step = settings.safeStepDistance();
+
+    var desc = std.mem.zeroes(ecs.query_desc_t);
+    desc.terms[0] = .{ .id = ecs.id(Position), .inout = .InOut };
+    desc.terms[1] = .{ .id = ecs.id(Velocity), .inout = .In };
+    desc.terms[2] = .{ .id = ecs.id(components.Ant) };
+
+    const query = ecs.query_init(world, &desc) catch return;
+    defer ecs.query_fini(query);
+
+    var it = ecs.query_iter(world, query);
+    while (ecs.query_next(&it)) {
+        const positions = ecs.field(&it, Position, 0).?;
+        const velocities = ecs.field(&it, Velocity, 1).?;
+
+        for (positions, velocities) |*pos, vel| {
+            const len = @sqrt(vel.x * vel.x + vel.y * vel.y);
+            if (len < std.math.floatEps(f32)) continue;
+            const dir_x = vel.x / len;
+            const dir_y = vel.y / len;
+
+            var move_x = dir_x * speed * delta;
+            var move_y = dir_y * speed * delta;
+            const move_dist = @sqrt(move_x * move_x + move_y * move_y);
+
+            if (move_dist > safe_step and move_dist > 0) {
+                move_x = move_x / move_dist * safe_step;
+                move_y = move_y / move_dist * safe_step;
+            }
+
+            pos.x += move_x;
+            pos.y += move_y;
+        }
+    }
+}
 
 // =============================================================================
 // Test Helpers
@@ -68,30 +106,15 @@ test "movement system caps to safe_step_distance (anti-tunneling)" {
     const world = createTestWorld();
     defer _ = ecs.fini(world);
 
-    _ = spawnTestAnt(world, 0.0, 0.0, 1.0, 0.0);
-    // Unlimited speed + large delta → should cap movement
+    const ant = spawnTestAnt(world, 0.0, 0.0, 1.0, 0.0);
     const settings = config.SimulationSettings{ .speed_multiplier = config.unlimited_speed };
     const delta: f32 = 0.1;
 
     movementSystem(world, &settings, delta);
 
-    // Movement should be capped to safe_step_distance = 18.0
-    const ant_query = ecs.query_init(world, &.{
-        .terms = .{
-            .{ .id = ecs.id(Position), .inout = .InOut },
-            .{ .id = ecs.id(components.Ant) },
-        } ++ .{.{}} ** 14,
-    }) orelse unreachable;
-    defer ecs.query_fini(ant_query);
-
-    var it = ecs.query_iter(world, ant_query);
-    while (ecs.query_next(&it)) {
-        const positions = ecs.field(&it, Position, 0).?;
-        for (positions) |pos| {
-            const dist = @sqrt(pos.x * pos.x + pos.y * pos.y);
-            try std.testing.expect(dist <= settings.safeStepDistance() + 0.01);
-        }
-    }
+    const pos = ecs.get(world, ant, Position).?;
+    const dist = @sqrt(pos.x * pos.x + pos.y * pos.y);
+    try std.testing.expect(dist <= settings.safeStepDistance() + 0.01);
 }
 
 test "movement system does nothing with zero delta" {
