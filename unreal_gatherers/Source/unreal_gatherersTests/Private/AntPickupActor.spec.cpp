@@ -237,6 +237,7 @@ bool FGatherersAntPickupActorAutomationTest::RunTest(const FString& Parameters)
 		return false;
 	}
 
+	ADD_LATENT_AUTOMATION_COMMAND(FGatherersPrepareDeterministicSimulationFixtureCommand(this));
 	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForSimulationPickupCommand(this, FPlatformTime::Seconds(), 5.0));
 	ADD_LATENT_AUTOMATION_COMMAND(FEndPlayMapCommand());
 	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForSimulationPIECleanupCommand(this, 5.0));
@@ -258,6 +259,7 @@ bool FGatherersAntPickupActorRerunAutomationTest::RunTest(const FString& Paramet
 		return false;
 	}
 
+	ADD_LATENT_AUTOMATION_COMMAND(FGatherersPrepareDeterministicSimulationFixtureCommand(this));
 	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForSimulationPickupCommand(this, FPlatformTime::Seconds(), 5.0));
 	ADD_LATENT_AUTOMATION_COMMAND(FEndPlayMapCommand());
 	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForSimulationPIECleanupCommand(this, 5.0));
@@ -280,6 +282,7 @@ bool FGatherersAntCarryMovementAutomationTest::RunTest(const FString& Parameters
 		return false;
 	}
 
+	ADD_LATENT_AUTOMATION_COMMAND(FGatherersPrepareDeterministicSimulationFixtureCommand(this));
 	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForCarryMovementCommand(this, FPlatformTime::Seconds(), 5.0));
 	ADD_LATENT_AUTOMATION_COMMAND(FEndPlayMapCommand());
 	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForSimulationPIECleanupCommand(this, 5.0));
@@ -301,6 +304,7 @@ bool FGatherersAntDropFoodAutomationTest::RunTest(const FString& Parameters)
 		return false;
 	}
 
+	ADD_LATENT_AUTOMATION_COMMAND(FGatherersPrepareDeterministicSimulationFixtureCommand(this));
 	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForDropStateCommand(this, FPlatformTime::Seconds(), 8.0));
 	ADD_LATENT_AUTOMATION_COMMAND(FEndPlayMapCommand());
 	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForSimulationPIECleanupCommand(this, 20.0));
@@ -322,6 +326,7 @@ bool FGatherersAntDropFoodRerunAutomationTest::RunTest(const FString& Parameters
 		return false;
 	}
 
+	ADD_LATENT_AUTOMATION_COMMAND(FGatherersPrepareDeterministicSimulationFixtureCommand(this));
 	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForDropStateCommand(this, FPlatformTime::Seconds(), 8.0));
 	ADD_LATENT_AUTOMATION_COMMAND(FEndPlayMapCommand());
 	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForSimulationPIECleanupCommand(this, 5.0));
