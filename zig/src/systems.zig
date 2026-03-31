@@ -130,3 +130,60 @@ test "movement system does nothing with zero delta" {
     try std.testing.expectEqual(@as(f32, 100.0), pos.x);
     try std.testing.expectEqual(@as(f32, 200.0), pos.y);
 }
+
+// =============================================================================
+// Boundary Wrap System Tests
+// =============================================================================
+
+test "boundary wrap: ant past right edge wraps to left" {
+    const world = createTestWorld();
+    defer _ = ecs.fini(world);
+
+    // Map 1280x720: half_width = 640
+    // Ant at x=650 with radius 10: 650-10=640 > 640 → wraps
+    const ant = spawnTestAnt(world, 650.0, 0.0, 1.0, 0.0);
+
+    boundaryWrapSystem(world, config.map_width, config.map_height);
+
+    const pos = ecs.get(world, ant, Position).?;
+    try std.testing.expect(pos.x < 0); // Should have wrapped to left side
+}
+
+test "boundary wrap: ant past left edge wraps to right" {
+    const world = createTestWorld();
+    defer _ = ecs.fini(world);
+
+    // Ant at x=-650 with radius 10: -650+10=-640 < -640 → wraps
+    const ant = spawnTestAnt(world, -650.0, 0.0, 1.0, 0.0);
+
+    boundaryWrapSystem(world, config.map_width, config.map_height);
+
+    const pos = ecs.get(world, ant, Position).?;
+    try std.testing.expect(pos.x > 0); // Should have wrapped to right side
+}
+
+test "boundary wrap: ant within bounds unchanged" {
+    const world = createTestWorld();
+    defer _ = ecs.fini(world);
+
+    const ant = spawnTestAnt(world, 100.0, 200.0, 1.0, 0.0);
+
+    boundaryWrapSystem(world, config.map_width, config.map_height);
+
+    const pos = ecs.get(world, ant, Position).?;
+    try std.testing.expectEqual(@as(f32, 100.0), pos.x);
+    try std.testing.expectEqual(@as(f32, 200.0), pos.y);
+}
+
+test "boundary wrap: vertical wrapping" {
+    const world = createTestWorld();
+    defer _ = ecs.fini(world);
+
+    // half_height = 360, ant at y=370 with radius 10: 370-10=360 > 360 → wraps
+    const ant = spawnTestAnt(world, 0.0, 370.0, 1.0, 0.0);
+
+    boundaryWrapSystem(world, config.map_width, config.map_height);
+
+    const pos = ecs.get(world, ant, Position).?;
+    try std.testing.expect(pos.y < 0); // Wrapped to bottom
+}
