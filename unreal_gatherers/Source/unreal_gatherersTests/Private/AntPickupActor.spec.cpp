@@ -1,9 +1,11 @@
 #include "Actors/Ant.h"
 #include "Actors/Food.h"
 #include "Editor.h"
+#include "EngineUtils.h"
 #include "HAL/PlatformTime.h"
 #include "Misc/AutomationTest.h"
 #include "Simulation/GatherersSpawnPlan.h"
+#include "Simulation/GatherersWorldSpawner.h"
 #include "TestLogic/GatherersWorldAssertions.h"
 #include "Tests/AutomationCommon.h"
 #include "Tests/AutomationEditorCommon.h"
@@ -26,6 +28,50 @@ DEFINE_LATENT_AUTOMATION_COMMAND_ONE_PARAMETER(
 	FGatherersQueueSecondDropSimulationRunCommand,
 	FAutomationTestBase*,
 	Test);
+
+class FGatherersPrepareDeterministicSimulationFixtureCommand : public IAutomationLatentCommand
+{
+public:
+	explicit FGatherersPrepareDeterministicSimulationFixtureCommand(FAutomationTestBase* InTest)
+		: Test(InTest)
+	{
+	}
+
+	virtual bool Update() override
+	{
+		UWorld* World = GEditor ? GEditor->PlayWorld : nullptr;
+		Test->TestNotNull(TEXT("simulation world should exist for deterministic fixture setup"), World);
+		if (World == nullptr)
+		{
+			return true;
+		}
+
+		const GatherersWorldAssertions::FObservedWorldState ExistingWorldState = GatherersWorldAssertions::Observe(World);
+		for (AAnt* Ant : ExistingWorldState.Ants)
+		{
+			if (Ant != nullptr)
+			{
+				Ant->Destroy();
+			}
+		}
+
+		for (AFood* Food : ExistingWorldState.Foods)
+		{
+			if (Food != nullptr)
+			{
+				Food->Destroy();
+			}
+		}
+
+		const FGatherersSpawnResult SpawnResult = SpawnGatherersActors(*World, BuildInitialGatherersSpawnPlan());
+		Test->TestEqual(TEXT("deterministic simulation fixture ant count"), SpawnResult.Ants.Num(), 1);
+		Test->TestEqual(TEXT("deterministic simulation fixture food count"), SpawnResult.Foods.Num(), 2);
+		return true;
+	}
+
+private:
+	FAutomationTestBase* Test;
+};
 
 class FGatherersWaitForSimulationPIECleanupCommand : public IAutomationLatentCommand
 {
@@ -200,6 +246,7 @@ bool FGatherersQueueSecondSimulationRunCommand::Update()
 		return true;
 	}
 
+	ADD_LATENT_AUTOMATION_COMMAND(FGatherersPrepareDeterministicSimulationFixtureCommand(Test));
 	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForSimulationPickupCommand(Test, FPlatformTime::Seconds(), 5.0));
 	ADD_LATENT_AUTOMATION_COMMAND(FEndPlayMapCommand());
 	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForSimulationPIECleanupCommand(Test, 5.0));
@@ -216,6 +263,7 @@ bool FGatherersQueueSecondDropSimulationRunCommand::Update()
 		return true;
 	}
 
+	ADD_LATENT_AUTOMATION_COMMAND(FGatherersPrepareDeterministicSimulationFixtureCommand(Test));
 	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForDropStateCommand(Test, FPlatformTime::Seconds(), 8.0));
 	ADD_LATENT_AUTOMATION_COMMAND(FEndPlayMapCommand());
 	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForSimulationPIECleanupCommand(Test, 5.0));
