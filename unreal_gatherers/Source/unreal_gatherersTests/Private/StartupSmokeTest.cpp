@@ -3,6 +3,7 @@
 #include "Editor.h"
 #include "HAL/PlatformTime.h"
 #include "Misc/AutomationTest.h"
+#include "Simulation/GatherersMassSubsystem.h"
 #include "Simulation/GatherersSpawnPlan.h"
 #include "TestLogic/GatherersWorldAssertions.h"
 #include "Tests/AutomationCommon.h"
@@ -36,6 +37,8 @@ bool FGatherersWaitForStartupActorsCommand::Update()
 	}
 
 	const GatherersWorldAssertions::FObservedWorldState WorldState = GatherersWorldAssertions::Observe(World);
+	UGatherersMassSubsystem* MassSubsystem = World->GetSubsystem<UGatherersMassSubsystem>();
+	Test->TestNotNull(TEXT("startup world should expose the gatherers Mass subsystem"), MassSubsystem);
 	if (WorldState.Ants.Num() != 26 || WorldState.Foods.Num() != 80)
 	{
 		if (FPlatformTime::Seconds() - StartTimeSeconds < TimeoutSeconds)
@@ -46,6 +49,11 @@ bool FGatherersWaitForStartupActorsCommand::Update()
 
 	Test->TestEqual(TEXT("startup ant count"), WorldState.Ants.Num(), 26);
 	Test->TestEqual(TEXT("startup food count"), WorldState.Foods.Num(), 80);
+	if (MassSubsystem != nullptr)
+	{
+		Test->TestEqual(TEXT("startup managed ant count"), MassSubsystem->GetManagedAntCount(), 26);
+		Test->TestEqual(TEXT("startup managed food count"), MassSubsystem->GetManagedFoodCount(), 80);
+	}
 	return true;
 }
 
