@@ -1,0 +1,12 @@
+.{
+    .name = .zig_gatherers,
+    .fingerprint = 0xd9eac393633e32bf,
+    .version = "0.1.0",
+    .dependencies = .{
+        .zflecs = .{
+            .url = "https://github.com/zig-gamedev/zflecs/archive/refs/heads/main.tar.gz",
+            .hash = "zflecs-0.2.0-dev-1PN3yg0OQQD8uFm8oLV-Bt-7rJGD8oTCso_X4i3dMmFm",
+        },
+    },
+    .paths = .{ "build.zig", "build.zig.zon", "src" },
+}
