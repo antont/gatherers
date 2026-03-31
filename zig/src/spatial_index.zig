@@ -1,6 +1,86 @@
 const std = @import("std");
+const config = @import("config.zig");
 
-// SpatialIndex — to be implemented
+const CellKey = struct {
+    x: i32,
+    y: i32,
+};
+
+const EntityList = std.ArrayList(u64);
+
+pub const SpatialIndex = struct {
+    map: std.AutoHashMap(CellKey, EntityList),
+    allocator: std.mem.Allocator,
+
+    pub fn init(allocator: std.mem.Allocator) SpatialIndex {
+        return .{
+            .map = std.AutoHashMap(CellKey, EntityList).init(allocator),
+            .allocator = allocator,
+        };
+    }
+
+    pub fn deinit(self: *SpatialIndex) void {
+        var it = self.map.valueIterator();
+        while (it.next()) |list| {
+            list.deinit(self.allocator);
+        }
+        self.map.deinit();
+    }
+
+    fn toCell(x: f32, y: f32) CellKey {
+        return .{
+            .x = @intFromFloat(@floor(x / config.spatial_cell_size)),
+            .y = @intFromFloat(@floor(y / config.spatial_cell_size)),
+        };
+    }
+
+    pub fn insert(self: *SpatialIndex, entity: u64, x: f32, y: f32) !void {
+        const cell = toCell(x, y);
+        const result = try self.map.getOrPut(cell);
+        if (!result.found_existing) {
+            result.value_ptr.* = .{};
+        }
+        try result.value_ptr.append(self.allocator, entity);
+    }
+
+    pub fn remove(self: *SpatialIndex, entity: u64) void {
+        var it = self.map.valueIterator();
+        while (it.next()) |list| {
+            var i: usize = 0;
+            while (i < list.items.len) {
+                if (list.items[i] == entity) {
+                    _ = list.swapRemove(i);
+                } else {
+                    i += 1;
+                }
+            }
+        }
+    }
+
+    pub fn clear(self: *SpatialIndex) void {
+        var it = self.map.valueIterator();
+        while (it.next()) |list| {
+            list.clearRetainingCapacity();
+        }
+    }
+
+    pub fn getNearby(self: *SpatialIndex, x: f32, y: f32) ![]u64 {
+        const center = toCell(x, y);
+        var result: EntityList = .{};
+
+        const offsets = [_]i32{ -1, 0, 1 };
+        for (offsets) |dx| {
+            for (offsets) |dy| {
+                const key = CellKey{ .x = center.x + dx, .y = center.y + dy };
+                if (self.map.get(key)) |list| {
+                    try result.appendSlice(self.allocator, list.items);
+                }
+            }
+        }
+
+        return result.toOwnedSlice(self.allocator);
+    }
+};
 
 // =============================================================================
 // Tests
@@ -9,7 +89,6 @@ const std = @import("std");
 const testing = std.testing;
 
 test "insert and getNearby returns entity in same cell" {
-    const SpatialIndex = @import("spatial_index.zig").SpatialIndex;
     var si = SpatialIndex.init(testing.allocator);
     defer si.deinit();
 
@@ -22,7 +101,6 @@ test "insert and getNearby returns entity in same cell" {
 }
 
 test "getNearby returns entities in adjacent cells (3x3 neighborhood)" {
-    const SpatialIndex = @import("spatial_index.zig").SpatialIndex;
     var si = SpatialIndex.init(testing.allocator);
     defer si.deinit();
 
@@ -37,7 +115,6 @@ test "getNearby returns entities in adjacent cells (3x3 neighborhood)" {
 }
 
 test "getNearby does NOT return entities outside 3x3 neighborhood" {
-    const SpatialIndex = @import("spatial_index.zig").SpatialIndex;
     var si = SpatialIndex.init(testing.allocator);
     defer si.deinit();
 
@@ -51,7 +128,6 @@ test "getNearby does NOT return entities outside 3x3 neighborhood" {
 }
 
 test "remove entity from spatial index" {
-    const SpatialIndex = @import("spatial_index.zig").SpatialIndex;
     var si = SpatialIndex.init(testing.allocator);
     defer si.deinit();
 
@@ -64,7 +140,6 @@ test "remove entity from spatial index" {
 }
 
 test "clear removes all entities" {
-    const SpatialIndex = @import("spatial_index.zig").SpatialIndex;
     var si = SpatialIndex.init(testing.allocator);
     defer si.deinit();
 
@@ -79,7 +154,6 @@ test "clear removes all entities" {
 }
 
 test "multiple entities in same cell" {
-    const SpatialIndex = @import("spatial_index.zig").SpatialIndex;
     var si = SpatialIndex.init(testing.allocator);
     defer si.deinit();
 
@@ -92,7 +166,6 @@ test "multiple entities in same cell" {
 }
 
 test "negative coordinates hash correctly" {
-    const SpatialIndex = @import("spatial_index.zig").SpatialIndex;
     var si = SpatialIndex.init(testing.allocator);
     defer si.deinit();
 
