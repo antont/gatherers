@@ -25,6 +25,7 @@ FGatherersSpawnPlan BuildDefaultGameFullSimulationSpawnPlan(
 {
 	FGatherersSpawnPlan Plan;
 	Plan.bUseFullSimulationMode = true;
+	Plan.bUseMassSimulation = true;
 	Plan.PlayAreaBounds = PlayAreaBounds;
 	Plan.RandomSeedBase = RandomSeed;
 

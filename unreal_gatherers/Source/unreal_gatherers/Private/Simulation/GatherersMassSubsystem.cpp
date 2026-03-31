@@ -89,6 +89,37 @@ void UGatherersMassSubsystem::Tick(float DeltaTime)
 			18.0f,
 			DeltaTime);
 
+		if (AntFragment.PlayAreaBounds.IsValid)
+		{
+			FVector InwardBoundaryNormal = FVector::ZeroVector;
+			if (AntFragment.Position.X < AntFragment.PlayAreaBounds.Min.X)
+			{
+				AntFragment.Position.X = AntFragment.PlayAreaBounds.Min.X;
+				InwardBoundaryNormal += FVector(1.0f, 0.0f, 0.0f);
+			}
+			else if (AntFragment.Position.X > AntFragment.PlayAreaBounds.Max.X)
+			{
+				AntFragment.Position.X = AntFragment.PlayAreaBounds.Max.X;
+				InwardBoundaryNormal += FVector(-1.0f, 0.0f, 0.0f);
+			}
+
+			if (AntFragment.Position.Y < AntFragment.PlayAreaBounds.Min.Y)
+			{
+				AntFragment.Position.Y = AntFragment.PlayAreaBounds.Min.Y;
+				InwardBoundaryNormal += FVector(0.0f, 1.0f, 0.0f);
+			}
+			else if (AntFragment.Position.Y > AntFragment.PlayAreaBounds.Max.Y)
+			{
+				AntFragment.Position.Y = AntFragment.PlayAreaBounds.Max.Y;
+				InwardBoundaryNormal += FVector(0.0f, -1.0f, 0.0f);
+			}
+
+			if (!InwardBoundaryNormal.IsNearlyZero())
+			{
+				AntFragment.Direction = ComputeBoundaryTurnBackDirection(AntFragment.Direction, InwardBoundaryNormal);
+			}
+		}
+
 		FMassEntityHandle NearbyFoodEntity;
 		FGatherersMassFoodFragment* NearbyFood = FindLooseFoodInPickupRadius(
 			EntityManager,
