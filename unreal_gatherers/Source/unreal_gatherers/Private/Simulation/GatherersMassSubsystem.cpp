@@ -4,13 +4,58 @@
 #include "Actors/Food.h"
 #include "MassEntityManager.h"
 #include "MassEntitySubsystem.h"
+#include "MassEntityView.h"
 #include "StructUtils/InstancedStruct.h"
+#include "Simulation/GatherersAntSimulation.h"
 #include "Simulation/GatherersSpawnPlan.h"
 #include "Simulation/GatherersWorldSpawner.h"
 
 void UGatherersMassSubsystem::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
+
+	if (!HasManagedSimulation())
+	{
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (World == nullptr)
+	{
+		return;
+	}
+
+	UMassEntitySubsystem* MassEntitySubsystem = World->GetSubsystem<UMassEntitySubsystem>();
+	if (MassEntitySubsystem == nullptr)
+	{
+		return;
+	}
+
+	FMassEntityManager& EntityManager = MassEntitySubsystem->GetMutableEntityManager();
+	for (const FMassEntityHandle Entity : ManagedAntEntities)
+	{
+		if (!EntityManager.IsEntityValid(Entity))
+		{
+			continue;
+		}
+
+		FMassEntityView AntView(EntityManager, Entity);
+		FGatherersMassAntFragment& AntFragment = AntView.GetFragmentData<FGatherersMassAntFragment>();
+		AntFragment.PickupCooldownRemainingSeconds = ComputeRemainingPickupCooldown(
+			AntFragment.PickupCooldownRemainingSeconds,
+			DeltaTime);
+		AntFragment.Position = ComputeAntHeadingMovementStep(
+			AntFragment.Position,
+			AntFragment.Direction,
+			AntFragment.MovementSpeed,
+			18.0f,
+			DeltaTime);
+
+		if (AAnt* AntProxy = AntFragment.ProxyActor.Get())
+		{
+			AntProxy->SetActorLocation(AntFragment.Position);
+		}
+	}
 }
 
 TStatId UGatherersMassSubsystem::GetStatId() const
