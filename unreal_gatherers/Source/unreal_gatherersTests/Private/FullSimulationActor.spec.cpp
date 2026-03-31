@@ -79,3 +79,42 @@ bool FGatherersFullSimulationBorderTurnBackAutomationTest::RunTest(const FString
 	Ant->Destroy();
 	return true;
 }
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FGatherersFullSimulationHighSpeedPickupAutomationTest,
+	"default.unreal_gatherers.FullSimulation.HighSpeedMovementStillPicksUpWithoutTunneling",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FGatherersFullSimulationHighSpeedPickupAutomationTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	TestNotNull(TEXT("editor world should exist"), World);
+
+	if (World == nullptr)
+	{
+		return false;
+	}
+
+	AAnt* Ant = World->SpawnActor<AAnt>(AAnt::StaticClass(), FTransform(FVector::ZeroVector));
+	AFood* Food = World->SpawnActor<AFood>(AFood::StaticClass(), FTransform(FVector(15.0f, 0.0f, 0.0f)));
+	TestNotNull(TEXT("high-speed ant should spawn"), Ant);
+	TestNotNull(TEXT("high-speed food should spawn"), Food);
+
+	if (Ant == nullptr || Food == nullptr)
+	{
+		return false;
+	}
+
+	Ant->ConfigureForFullSimulation(FVector(1.0f, 0.0f, 0.0f), FBox(FVector(-500.0f, -500.0f, -100.0f), FVector(500.0f, 500.0f, 100.0f)), 123);
+	Ant->SetFullSimulationTurnJitterRadians(0.0f);
+	Ant->SetFullSimulationMovementSpeed(5000.0f);
+	Ant->Tick(1.0f);
+
+	TestTrue(
+		TEXT("safe-step movement still lets a nearby food be picked up during a long high-speed frame"),
+		Food->GetAttachParentActor() == Ant);
+
+	Ant->Destroy();
+	Food->Destroy();
+	return true;
+}
