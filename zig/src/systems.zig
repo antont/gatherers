@@ -18,6 +18,64 @@ pub const HitEvent = struct {
     ant: ecs.entity_t,
 };
 
+// --- Ant Hits System ---
+
+pub fn antHitsSystem(world: *ecs.world_t, hits: []const HitEvent, random: std.Random) void {
+    for (hits) |hit| {
+        const ant = hit.ant;
+
+        // Skip ants with cooldown
+        if (ecs.get(world, ant, Cooldown) != null) continue;
+
+        // Get ant position and velocity
+        const ant_pos = ecs.get(world, ant, Position) orelse continue;
+        const ant_vel = ecs.get(world, ant, Velocity) orelse continue;
+
+        // Check if ant is currently carrying food
+        const carrying = ecs.get(world, ant, Carrying);
+
+        if (carrying != null) {
+            // --- DROP carried food ---
+            const carried_food = carrying.?.food;
+
+            // Set food position to ant's position
+            _ = ecs.set(world, carried_food, Position, .{
+                .x = ant_pos.x,
+                .y = ant_pos.y,
+            });
+
+            // Remove carrying/carried-by relationships
+            ecs.remove(world, ant, Carrying);
+            ecs.remove(world, carried_food, CarriedBy);
+
+            // Re-add collidable to dropped food
+            ecs.add(world, carried_food, components.Collidable);
+
+            // Add cooldown to ant
+            _ = ecs.set(world, ant, Cooldown, .{ .timer = config.base_pickup_cooldown });
+        } else {
+            // --- PICKUP food ---
+            const food = hit.food;
+
+            // Set carrying relationship
+            _ = ecs.set(world, ant, Carrying, .{ .food = food });
+            _ = ecs.set(world, food, CarriedBy, .{ .ant = ant });
+
+            // Remove collidable from picked-up food
+            ecs.remove(world, food, components.Collidable);
+        }
+
+        // Turn: reverse direction + random angle (±turn_angle_range)
+        const current_angle = std.math.atan2(ant_vel.y, ant_vel.x);
+        const random_offset = random.float(f32) * 2.0 * config.turn_angle_range - config.turn_angle_range;
+        const new_angle = current_angle + std.math.pi + random_offset;
+        _ = ecs.set(world, ant, Velocity, .{
+            .x = @cos(new_angle),
+            .y = @sin(new_angle),
+        });
+    }
+}
+
 // --- Spatial Index Update System ---
 
 pub fn updateSpatialIndexSystem(world: *ecs.world_t, si: *SpatialIndex) void {
