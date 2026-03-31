@@ -242,6 +242,28 @@ pub fn movementSystem(world: *ecs.world_t, settings: *const config.SimulationSet
             pos.y += move_y;
         }
     }
+
+    // Update carried food positions to match their carrying ant
+    var carry_desc = std.mem.zeroes(ecs.query_desc_t);
+    carry_desc.terms[0] = .{ .id = ecs.id(Position), .inout = .In };
+    carry_desc.terms[1] = .{ .id = ecs.id(Carrying), .inout = .In };
+    carry_desc.terms[2] = .{ .id = ecs.id(components.Ant) };
+
+    const carry_query = ecs.query_init(world, &carry_desc) catch return;
+    defer ecs.query_fini(carry_query);
+
+    var carry_it = ecs.query_iter(world, carry_query);
+    while (ecs.query_next(&carry_it)) {
+        const ant_positions = ecs.field(&carry_it, Position, 0).?;
+        const carryings = ecs.field(&carry_it, Carrying, 1).?;
+
+        for (ant_positions, carryings) |ant_pos, carrying| {
+            _ = ecs.set(world, carrying.food, Position, .{
+                .x = ant_pos.x,
+                .y = ant_pos.y,
+            });
+        }
+    }
 }
 
 // =============================================================================

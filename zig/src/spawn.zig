@@ -38,29 +38,40 @@ pub fn generateSpawnLayout(map_width: f32, map_height: f32, seed: u64) SpawnLayo
     var random = rng.random();
 
     // Generate ants along horizontal line at y=100
+    // Match Rust: (-half_x..half_x).step_by(step) — half-open range
     const step: i32 = config.ant_spawn_step;
-    const range: i32 = half_x * 2;
-    const ant_count: usize = @intCast(@divTrunc(range, step));
     var layout = SpawnLayout{};
+    var ant_count: usize = 0;
+    {
+        var x: i32 = -half_x;
+        while (x < half_x) : (x += step) {
+            ant_count += 1;
+        }
+    }
     layout.ant_count = ant_count;
 
-    for (0..ant_count) |i| {
-        const x: f32 = @floatFromInt(-half_x + @as(i32, @intCast(i)) * step);
-        const angle = random.float(f32) * 2.0 * std.math.pi;
-        layout.ants_buf[i] = .{
-            .x = x,
-            .y = config.ant_spawn_y,
-            .dir_x = @cos(angle),
-            .dir_y = @sin(angle),
-        };
+    {
+        var x: i32 = -half_x;
+        var i: usize = 0;
+        while (x < half_x) : (x += step) {
+            const angle = random.float(f32) * 2.0 * std.math.pi;
+            layout.ants_buf[i] = .{
+                .x = @floatFromInt(x),
+                .y = config.ant_spawn_y,
+                .dir_x = @cos(angle),
+                .dir_y = @sin(angle),
+            };
+            i += 1;
+        }
     }
 
     // Generate food at random positions
+    // Match Rust: random_range(-half..half) — exclusive upper bound
     const fc: usize = @intCast(config.food_count);
     layout.food_count = fc;
     for (0..fc) |i| {
-        const fx: i32 = random.intRangeAtMost(i32, -half_x, half_x);
-        const fy: i32 = random.intRangeAtMost(i32, -half_y, half_y);
+        const fx: i32 = random.intRangeLessThan(i32, -half_x, half_x);
+        const fy: i32 = random.intRangeLessThan(i32, -half_y, half_y);
         layout.food_buf[i] = .{
             .x = @floatFromInt(fx),
             .y = @floatFromInt(fy),
