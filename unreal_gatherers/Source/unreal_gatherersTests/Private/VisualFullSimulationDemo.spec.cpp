@@ -1,5 +1,3 @@
-#include "Actors/Ant.h"
-#include "Actors/Food.h"
 #include "Editor.h"
 #include "FileHelpers.h"
 #include "HAL/PlatformTime.h"
@@ -9,6 +7,7 @@
 #include "Simulation/GatherersMassSubsystem.h"
 #include "Simulation/GatherersSpawnPlan.h"
 #include "Simulation/GatherersWorldSpawner.h"
+#include "TestLogic/GatherersWorldAssertions.h"
 
 namespace
 {
@@ -50,10 +49,8 @@ void FrameVisualFullSimulationInViewport(const FGatherersSpawnPlan& Plan)
 class FGatherersAdvanceVisibleFullSimulationCommand : public IAutomationLatentCommand
 {
 public:
-	FGatherersAdvanceVisibleFullSimulationCommand(FAutomationTestBase* InTest, AAnt* InAnt, const TArray<AFood*>& InFoods)
+	explicit FGatherersAdvanceVisibleFullSimulationCommand(FAutomationTestBase* InTest)
 		: Test(InTest),
-		  Ant(InAnt),
-		  Foods(InFoods),
 		  StartTimeSeconds(FPlatformTime::Seconds()),
 		  LastStepTimeSeconds(StartTimeSeconds)
 	{
@@ -75,22 +72,8 @@ public:
 			return true;
 		}
 
-		Test->TestNotNull(TEXT("visual full-sim ant should remain valid"), Ant);
-		if (Ant == nullptr)
-		{
-			return true;
-		}
-
-		int32 AttachedFoodCount = 0;
-		for (AFood* Food : Foods)
-		{
-			if (Food != nullptr && Food->GetAttachParentActor() == Ant)
-			{
-				++AttachedFoodCount;
-			}
-		}
-
-		if (AttachedFoodCount == 1)
+		const GatherersWorldAssertions::FObservedMassVisualState VisualState = GatherersWorldAssertions::ObserveMassVisuals(World);
+		if (VisualState.HasCarriedFoodVisual(20.0f))
 		{
 			++ObservedAttachedFoodFrames;
 		}
@@ -120,8 +103,6 @@ public:
 
 private:
 	FAutomationTestBase* Test;
-	AAnt* Ant;
-	TArray<AFood*> Foods;
 	double StartTimeSeconds;
 	double LastStepTimeSeconds;
 	int32 ObservedAttachedFoodFrames = 0;
@@ -160,17 +141,20 @@ bool FGatherersVisualFullSimulationAutomationTest::RunTest(const FString& Parame
 
 	MassSubsystem->ResetSimulation();
 
-	const FGatherersSpawnPlan Plan = BuildFullSimulationVisualSpawnPlan();
+	FGatherersSpawnPlan Plan = BuildFullSimulationVisualSpawnPlan();
+	Plan.bSpawnActorVisuals = false;
 	const FGatherersSpawnResult Result = SpawnGatherersActors(*World, Plan);
-	TestEqual(TEXT("full-sim visual spawned ant count"), Result.Ants.Num(), 1);
-	TestEqual(TEXT("full-sim visual spawned food count"), Result.Foods.Num(), 3);
+	TestEqual(TEXT("full-sim visual spawned ant actor count"), Result.Ants.Num(), 0);
+	TestEqual(TEXT("full-sim visual spawned food actor count"), Result.Foods.Num(), 0);
+	TestEqual(TEXT("full-sim visual managed ant count"), MassSubsystem->GetManagedAntCount(), 1);
+	TestEqual(TEXT("full-sim visual managed food count"), MassSubsystem->GetManagedFoodCount(), 3);
 
-	if (Result.Ants.Num() != 1 || Result.Foods.Num() != 3)
+	if (MassSubsystem->GetManagedAntCount() != 1 || MassSubsystem->GetManagedFoodCount() != 3)
 	{
 		return false;
 	}
 
 	FrameVisualFullSimulationInViewport(Plan);
-	ADD_LATENT_AUTOMATION_COMMAND(FGatherersAdvanceVisibleFullSimulationCommand(this, Result.Ants[0], Result.Foods));
+	ADD_LATENT_AUTOMATION_COMMAND(FGatherersAdvanceVisibleFullSimulationCommand(this));
 	return true;
 }

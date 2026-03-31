@@ -10,19 +10,22 @@ FGatherersSpawnResult SpawnGatherersActors(UWorld& World, const FGatherersSpawnP
 {
 	FGatherersSpawnResult Result;
 
-	for (const FTransform& SpawnTransform : Plan.AntSpawns)
+	if (Plan.bSpawnActorVisuals)
 	{
-		if (AAnt* Ant = World.SpawnActor<AAnt>(AAnt::StaticClass(), SpawnTransform))
+		for (const FTransform& SpawnTransform : Plan.AntSpawns)
 		{
-			Result.Ants.Add(Ant);
+			if (AAnt* Ant = World.SpawnActor<AAnt>(AAnt::StaticClass(), SpawnTransform))
+			{
+				Result.Ants.Add(Ant);
+			}
 		}
-	}
 
-	for (const FTransform& SpawnTransform : Plan.FoodSpawns)
-	{
-		if (AFood* Food = World.SpawnActor<AFood>(AFood::StaticClass(), SpawnTransform))
+		for (const FTransform& SpawnTransform : Plan.FoodSpawns)
 		{
-			Result.Foods.Add(Food);
+			if (AFood* Food = World.SpawnActor<AFood>(AFood::StaticClass(), SpawnTransform))
+			{
+				Result.Foods.Add(Food);
+			}
 		}
 	}
 

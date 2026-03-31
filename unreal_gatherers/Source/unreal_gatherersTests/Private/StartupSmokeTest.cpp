@@ -36,10 +36,11 @@ bool FGatherersWaitForStartupActorsCommand::Update()
 		return true;
 	}
 
-	const GatherersWorldAssertions::FObservedWorldState WorldState = GatherersWorldAssertions::Observe(World);
+	const GatherersWorldAssertions::FObservedMassVisualState VisualState = GatherersWorldAssertions::ObserveMassVisuals(World);
 	UGatherersMassSubsystem* MassSubsystem = World->GetSubsystem<UGatherersMassSubsystem>();
 	Test->TestNotNull(TEXT("startup world should expose the gatherers Mass subsystem"), MassSubsystem);
-	if (WorldState.Ants.Num() != 26 || WorldState.Foods.Num() != 80)
+	const GatherersWorldAssertions::FObservedWorldState ActorState = GatherersWorldAssertions::Observe(World);
+	if (VisualState.AntPositions.Num() != 26 || VisualState.FoodPositions.Num() != 80)
 	{
 		if (FPlatformTime::Seconds() - StartTimeSeconds < TimeoutSeconds)
 		{
@@ -47,8 +48,12 @@ bool FGatherersWaitForStartupActorsCommand::Update()
 		}
 	}
 
-	Test->TestEqual(TEXT("startup ant count"), WorldState.Ants.Num(), 26);
-	Test->TestEqual(TEXT("startup food count"), WorldState.Foods.Num(), 80);
+	Test->TestEqual(TEXT("startup ant actor count"), ActorState.Ants.Num(), 0);
+	Test->TestEqual(TEXT("startup food actor count"), ActorState.Foods.Num(), 0);
+	Test->TestEqual(TEXT("startup ant entity count"), VisualState.AntPositions.Num(), 26);
+	Test->TestEqual(TEXT("startup food entity count"), VisualState.FoodPositions.Num(), 80);
+	Test->TestEqual(TEXT("startup ant visual count"), VisualState.AntVisualPositions.Num(), 26);
+	Test->TestEqual(TEXT("startup food visual count"), VisualState.FoodVisualPositions.Num(), 80);
 	if (MassSubsystem != nullptr)
 	{
 		Test->TestEqual(TEXT("startup managed ant count"), MassSubsystem->GetManagedAntCount(), 26);

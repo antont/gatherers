@@ -1,6 +1,6 @@
-#include "Actors/Ant.h"
-#include "Actors/Food.h"
 #include "Editor.h"
+#include "MassEntitySubsystem.h"
+#include "MassEntityView.h"
 #include "Misc/AutomationTest.h"
 #include "Simulation/GatherersMassSubsystem.h"
 #include "Simulation/GatherersSpawnPlan.h"
@@ -26,37 +26,24 @@ UGatherersMassSubsystem* RequireMassSubsystem(FAutomationTestBase& Test, UWorld*
 	return MassSubsystem;
 }
 
-int32 CountAttachedFoods(const TArray<AFood*>& Foods)
+bool AnyFoodAtLocation(const TArray<FMassEntityHandle>& FoodEntities, FMassEntityManager& EntityManager, const FVector& ExpectedLocation)
 {
-	int32 AttachedFoodCount = 0;
-	for (AFood* Food : Foods)
+	for (const FMassEntityHandle FoodEntity : FoodEntities)
 	{
-		if (Food != nullptr && Food->GetAttachParentActor() != nullptr)
+		if (!EntityManager.IsEntityValid(FoodEntity))
 		{
-			++AttachedFoodCount;
+			continue;
+		}
+
+		FMassEntityView FoodView(EntityManager, FoodEntity);
+		const FGatherersMassFoodFragment& FoodFragment = FoodView.GetFragmentData<FGatherersMassFoodFragment>();
+		if (FoodFragment.Position.Equals(ExpectedLocation, 1.0f))
+		{
+			return true;
 		}
 	}
 
-	return AttachedFoodCount;
-}
-
-void DestroySpawnedActors(const FGatherersSpawnResult& Result)
-{
-	for (AAnt* Ant : Result.Ants)
-	{
-		if (Ant != nullptr)
-		{
-			Ant->Destroy();
-		}
-	}
-
-	for (AFood* Food : Result.Foods)
-	{
-		if (Food != nullptr)
-		{
-			Food->Destroy();
-		}
-	}
+	return false;
 }
 }
 
@@ -76,6 +63,7 @@ bool FGatherersFullSimulationFirstDropAutomationTest::RunTest(const FString& Par
 
 	FGatherersSpawnPlan Plan;
 	Plan.bUseFullSimulationMode = true;
+	Plan.bSpawnActorVisuals = false;
 	Plan.PlayAreaBounds = FBox(FVector(-100.0f, -100.0f, -100.0f), FVector(100.0f, 100.0f, 100.0f));
 	Plan.RandomSeedBase = 123;
 	Plan.FullSimulationTurnJitterRadians = 0.0f;
@@ -86,10 +74,12 @@ bool FGatherersFullSimulationFirstDropAutomationTest::RunTest(const FString& Par
 	Plan.FoodSpawns.Add(FTransform(FVector(50.0f, 0.0f, 0.0f)));
 
 	const FGatherersSpawnResult Result = SpawnGatherersActors(*World, Plan);
-	TestEqual(TEXT("full-sim observation ant count"), Result.Ants.Num(), 1);
-	TestEqual(TEXT("full-sim observation food count"), Result.Foods.Num(), 3);
+	TestEqual(TEXT("full-sim observation ant actor count"), Result.Ants.Num(), 0);
+	TestEqual(TEXT("full-sim observation food actor count"), Result.Foods.Num(), 0);
+	TestEqual(TEXT("full-sim observation managed ant count"), MassSubsystem->GetManagedAntCount(), 1);
+	TestEqual(TEXT("full-sim observation managed food count"), MassSubsystem->GetManagedFoodCount(), 3);
 
-	if (Result.Ants.Num() != 1 || Result.Foods.Num() != 3)
+	if (MassSubsystem->GetManagedAntCount() != 1 || MassSubsystem->GetManagedFoodCount() != 3)
 	{
 		return false;
 	}
@@ -97,13 +87,33 @@ bool FGatherersFullSimulationFirstDropAutomationTest::RunTest(const FString& Par
 	MassSubsystem->Tick(0.1f);
 	MassSubsystem->Tick(0.1f);
 
-	TestEqual(TEXT("food count stays constant after pickup then first drop"), Result.Foods.Num(), 3);
-	TestEqual(TEXT("first drop leaves all food loose again"), CountAttachedFoods(Result.Foods), 0);
+	UMassEntitySubsystem* MassEntitySubsystem = World->GetSubsystem<UMassEntitySubsystem>();
+	TestNotNull(TEXT("Mass entity subsystem should exist"), MassEntitySubsystem);
+	if (MassEntitySubsystem == nullptr)
+	{
+		return false;
+	}
+
+	FMassEntityManager& EntityManager = MassEntitySubsystem->GetMutableEntityManager();
+	FMassEntityView AntView(EntityManager, MassSubsystem->ManagedAntEntities[0]);
+	const FGatherersMassAntFragment& AntFragment = AntView.GetFragmentData<FGatherersMassAntFragment>();
+	int32 LooseFoodCount = 0;
+	for (const FMassEntityHandle FoodEntity : MassSubsystem->ManagedFoodEntities)
+	{
+		FMassEntityView FoodView(EntityManager, FoodEntity);
+		const FGatherersMassFoodFragment& FoodFragment = FoodView.GetFragmentData<FGatherersMassFoodFragment>();
+		if (FoodFragment.bIsLoose)
+		{
+			++LooseFoodCount;
+		}
+	}
+
+	TestEqual(TEXT("food count stays constant after pickup then first drop"), MassSubsystem->GetManagedFoodCount(), 3);
+	TestEqual(TEXT("first drop leaves all food loose again"), LooseFoodCount, 3);
 	TestTrue(
 		TEXT("one loose food stays near the ant after the first drop"),
-		Result.Foods[0]->GetActorLocation().Equals(Result.Ants[0]->GetActorLocation(), 1.0f));
+		AnyFoodAtLocation(MassSubsystem->ManagedFoodEntities, EntityManager, AntFragment.Position));
 
-	DestroySpawnedActors(Result);
 	MassSubsystem->ResetSimulation();
 	return true;
 }
@@ -124,6 +134,7 @@ bool FGatherersFullSimulationCooldownAutomationTest::RunTest(const FString& Para
 
 	FGatherersSpawnPlan Plan;
 	Plan.bUseFullSimulationMode = true;
+	Plan.bSpawnActorVisuals = false;
 	Plan.PlayAreaBounds = FBox(FVector(-100.0f, -100.0f, -100.0f), FVector(100.0f, 100.0f, 100.0f));
 	Plan.RandomSeedBase = 123;
 	Plan.FullSimulationTurnJitterRadians = 0.0f;
@@ -134,10 +145,12 @@ bool FGatherersFullSimulationCooldownAutomationTest::RunTest(const FString& Para
 	Plan.FoodSpawns.Add(FTransform(FVector(50.0f, 0.0f, 0.0f)));
 
 	const FGatherersSpawnResult Result = SpawnGatherersActors(*World, Plan);
-	TestEqual(TEXT("full-sim cooldown ant count"), Result.Ants.Num(), 1);
-	TestEqual(TEXT("full-sim cooldown food count"), Result.Foods.Num(), 3);
+	TestEqual(TEXT("full-sim cooldown ant actor count"), Result.Ants.Num(), 0);
+	TestEqual(TEXT("full-sim cooldown food actor count"), Result.Foods.Num(), 0);
+	TestEqual(TEXT("full-sim cooldown managed ant count"), MassSubsystem->GetManagedAntCount(), 1);
+	TestEqual(TEXT("full-sim cooldown managed food count"), MassSubsystem->GetManagedFoodCount(), 3);
 
-	if (Result.Ants.Num() != 1 || Result.Foods.Num() != 3)
+	if (MassSubsystem->GetManagedAntCount() != 1 || MassSubsystem->GetManagedFoodCount() != 3)
 	{
 		return false;
 	}
@@ -147,16 +160,43 @@ bool FGatherersFullSimulationCooldownAutomationTest::RunTest(const FString& Para
 		MassSubsystem->Tick(0.1f);
 	}
 
-	TestEqual(TEXT("cooldown blocks immediate re-pickup right after the first drop"), CountAttachedFoods(Result.Foods), 0);
+	UMassEntitySubsystem* MassEntitySubsystem = World->GetSubsystem<UMassEntitySubsystem>();
+	TestNotNull(TEXT("Mass entity subsystem should exist"), MassEntitySubsystem);
+	if (MassEntitySubsystem == nullptr)
+	{
+		return false;
+	}
+
+	FMassEntityManager& EntityManager = MassEntitySubsystem->GetMutableEntityManager();
+	int32 LooseFoodCount = 0;
+	for (const FMassEntityHandle FoodEntity : MassSubsystem->ManagedFoodEntities)
+	{
+		FMassEntityView FoodView(EntityManager, FoodEntity);
+		const FGatherersMassFoodFragment& FoodFragment = FoodView.GetFragmentData<FGatherersMassFoodFragment>();
+		if (FoodFragment.bIsLoose)
+		{
+			++LooseFoodCount;
+		}
+	}
+	TestEqual(TEXT("cooldown blocks immediate re-pickup right after the first drop"), LooseFoodCount, 3);
 
 	for (int32 StepIndex = 0; StepIndex < 5; ++StepIndex)
 	{
 		MassSubsystem->Tick(0.1f);
 	}
 
-	TestEqual(TEXT("after cooldown the ant can gather again"), CountAttachedFoods(Result.Foods), 1);
+	LooseFoodCount = 0;
+	for (const FMassEntityHandle FoodEntity : MassSubsystem->ManagedFoodEntities)
+	{
+		FMassEntityView FoodView(EntityManager, FoodEntity);
+		const FGatherersMassFoodFragment& FoodFragment = FoodView.GetFragmentData<FGatherersMassFoodFragment>();
+		if (FoodFragment.bIsLoose)
+		{
+			++LooseFoodCount;
+		}
+	}
+	TestEqual(TEXT("after cooldown the ant can gather again"), LooseFoodCount, 2);
 
-	DestroySpawnedActors(Result);
 	MassSubsystem->ResetSimulation();
 	return true;
 }

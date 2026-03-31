@@ -8,6 +8,7 @@ struct UNREAL_GATHERERS_API FGatherersSpawnPlan
 	TArray<FVector> AntInitialDirections;
 	TArray<FTransform> FoodSpawns;
 	bool bUseFullSimulationMode = false;
+	bool bSpawnActorVisuals = false;
 	FBox PlayAreaBounds = FBox(EForceInit::ForceInit);
 	int32 RandomSeedBase = 0;
 	float FullSimulationMovementSpeed = 100.0f;

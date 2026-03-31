@@ -12,6 +12,7 @@ bool FGatherersSpawnPlanAutomationTest::RunTest(const FString& Parameters)
 
 	TestEqual(TEXT("ant spawn count"), Plan.AntSpawns.Num(), 1);
 	TestEqual(TEXT("food spawn count"), Plan.FoodSpawns.Num(), 2);
+	TestFalse(TEXT("initial Mass-backed spawn plan does not request actor visuals"), Plan.bSpawnActorVisuals);
 	TestTrue(
 		TEXT("first food spawn is the initial forward target"),
 		Plan.FoodSpawns[0].GetLocation().Equals(FVector(200.0f, 0.0f, 50.0f), KINDA_SMALL_NUMBER));
@@ -33,6 +34,7 @@ bool FGatherersDefaultGameFullSimulationSpawnPlanAutomationTest::RunTest(const F
 		123);
 
 	TestTrue(TEXT("default game spawn plan uses full simulation mode"), Plan.bUseFullSimulationMode);
+	TestFalse(TEXT("default game spawn plan does not request actor visuals"), Plan.bSpawnActorVisuals);
 	TestEqual(TEXT("default game ant spawn count follows the Rust row spacing"), Plan.AntSpawns.Num(), 26);
 	TestEqual(TEXT("default game ant heading count matches the spawned ants"), Plan.AntInitialDirections.Num(), 26);
 	TestEqual(TEXT("default game food count follows the Rust default"), Plan.FoodSpawns.Num(), 80);

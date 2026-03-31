@@ -71,9 +71,11 @@ public:
 			}
 		}
 
-		const FGatherersSpawnResult SpawnResult = SpawnGatherersActors(*World, BuildInitialGatherersSpawnPlan());
-		Test->TestEqual(TEXT("deterministic simulation fixture ant count"), SpawnResult.Ants.Num(), 1);
-		Test->TestEqual(TEXT("deterministic simulation fixture food count"), SpawnResult.Foods.Num(), 2);
+		FGatherersSpawnPlan Plan = BuildInitialGatherersSpawnPlan();
+		Plan.bSpawnActorVisuals = false;
+		const FGatherersSpawnResult SpawnResult = SpawnGatherersActors(*World, Plan);
+		Test->TestEqual(TEXT("deterministic simulation fixture ant actor count"), SpawnResult.Ants.Num(), 0);
+		Test->TestEqual(TEXT("deterministic simulation fixture food actor count"), SpawnResult.Foods.Num(), 0);
 		if (MassSubsystem != nullptr)
 		{
 			Test->TestEqual(TEXT("deterministic simulation fixture managed ant count"), MassSubsystem->GetManagedAntCount(), 1);
@@ -135,22 +137,19 @@ public:
 			return true;
 		}
 
-		const GatherersWorldAssertions::FObservedWorldState WorldState = GatherersWorldAssertions::Observe(World);
-		AAnt* Ant = WorldState.GetSingleAnt();
-		AFood* AttachedFood = WorldState.GetFirstAttachedFood();
-		const bool bPickedUpFood = Ant != nullptr && AttachedFood != nullptr && AttachedFood->GetAttachParentActor() == Ant
-			&& WorldState.CountAttachedFoods() == 1;
+		const GatherersWorldAssertions::FObservedMassVisualState VisualState = GatherersWorldAssertions::ObserveMassVisuals(World);
+		const bool bPickedUpFood = VisualState.HasCarriedFoodVisual(20.0f);
 
 		if (bPickedUpFood && !PickupLocation.IsSet())
 		{
-			PickupLocation = Ant->GetActorLocation();
+			PickupLocation = VisualState.AntPositions[0];
 			return false;
 		}
 
 		if (bPickedUpFood && PickupLocation.IsSet())
 		{
 			const bool bAntMovedWhileCarrying =
-				!Ant->GetActorLocation().Equals(PickupLocation.GetValue(), KINDA_SMALL_NUMBER);
+				!VisualState.AntPositions[0].Equals(PickupLocation.GetValue(), KINDA_SMALL_NUMBER);
 			if (bAntMovedWhileCarrying)
 			{
 				Test->TestTrue(TEXT("ant keeps moving after pickup while carrying food"), true);
@@ -193,22 +192,17 @@ public:
 			return true;
 		}
 
-		const FGatherersSpawnPlan Plan = BuildInitialGatherersSpawnPlan();
-		const GatherersWorldAssertions::FObservedWorldState WorldState = GatherersWorldAssertions::Observe(World);
-		const bool bHasOneAntAndTwoFoods = WorldState.Ants.Num() == 1 && WorldState.Foods.Num() == 2;
-		bool bAnyFoodAttached = false;
+		FGatherersSpawnPlan Plan = BuildInitialGatherersSpawnPlan();
+		Plan.bSpawnActorVisuals = false;
+		const GatherersWorldAssertions::FObservedMassVisualState VisualState = GatherersWorldAssertions::ObserveMassVisuals(World);
+		const bool bHasOneAntAndTwoFoods = VisualState.HasSingleAntAndTwoFoods();
+		const bool bAnyFoodAttached = VisualState.HasCarriedFoodVisual(20.0f);
 		bool bDroppedFoodLeftInitialForwardSpawn = false;
 
-		for (AFood* Food : WorldState.Foods)
+		for (const FVector& FoodPosition : VisualState.FoodPositions)
 		{
-			if (Food == nullptr)
-			{
-				continue;
-			}
-
-			bAnyFoodAttached |= Food->GetAttachParentActor() != nullptr;
 			bDroppedFoodLeftInitialForwardSpawn |=
-				!Food->GetActorLocation().Equals(Plan.FoodSpawns[0].GetLocation(), KINDA_SMALL_NUMBER);
+				!FoodPosition.Equals(Plan.FoodSpawns[0].GetLocation(), KINDA_SMALL_NUMBER);
 		}
 
 		if (bAnyFoodAttached)
@@ -240,13 +234,19 @@ private:
 
 bool FGatherersWaitForSimulationPickupCommand::Update()
 {
-	return GatherersWorldAssertions::PollForPickupState(
+	return GatherersWorldAssertions::PollForMassPickupState(
 		*Test,
 		GEditor ? GEditor->PlayWorld : nullptr,
-		BuildInitialGatherersSpawnPlan(),
+		[]()
+		{
+			FGatherersSpawnPlan Plan = BuildInitialGatherersSpawnPlan();
+			Plan.bSpawnActorVisuals = false;
+			return Plan;
+		}(),
 		StartTimeSeconds,
 		TimeoutSeconds,
-		TEXT("simulation"));
+		TEXT("simulation"),
+		20.0f);
 }
 
 bool FGatherersQueueSecondSimulationRunCommand::Update()

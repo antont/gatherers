@@ -18,6 +18,7 @@ public class unreal_gatherers : ModuleRules
 			"MassCommon",
 			"MassActors",
 			"MassSimulation",
+			"MassRepresentation",
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] {  });

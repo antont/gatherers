@@ -1,6 +1,8 @@
 #include "Actors/Ant.h"
 #include "Actors/Food.h"
 #include "Editor.h"
+#include "MassEntitySubsystem.h"
+#include "MassEntityView.h"
 #include "Misc/AutomationTest.h"
 #include "Simulation/GatherersMassSubsystem.h"
 #include "Simulation/GatherersSpawnPlan.h"
@@ -14,6 +16,11 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FGatherersMassProxyAuthorityAutomationTest,
 	"default.unreal_gatherers.Mass.FullSimProxyDoesNotOwnActorRuntimeState",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FGatherersMassRepresentationBridgeAutomationTest,
+	"default.unreal_gatherers.Mass.EntitiesAdvanceWithoutActorVisualProxies",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FGatherersMassBridgeAutomationTest::RunTest(const FString& Parameters)
@@ -38,6 +45,7 @@ bool FGatherersMassBridgeAutomationTest::RunTest(const FString& Parameters)
 
 	FGatherersSpawnPlan Plan;
 	Plan.bUseFullSimulationMode = true;
+	Plan.bSpawnActorVisuals = true;
 	Plan.PlayAreaBounds = FBox(FVector(-500.0f, -500.0f, -100.0f), FVector(500.0f, 500.0f, 100.0f));
 	Plan.AntSpawns.Add(FTransform(FVector::ZeroVector));
 	Plan.AntInitialDirections.Add(FVector(1.0f, 0.0f, 0.0f));
@@ -92,6 +100,7 @@ bool FGatherersMassProxyAuthorityAutomationTest::RunTest(const FString& Paramete
 
 	FGatherersSpawnPlan Plan;
 	Plan.bUseFullSimulationMode = true;
+	Plan.bSpawnActorVisuals = true;
 	Plan.PlayAreaBounds = FBox(FVector(-500.0f, -500.0f, -100.0f), FVector(500.0f, 500.0f, 100.0f));
 	Plan.AntSpawns.Add(FTransform(FVector::ZeroVector));
 	Plan.AntInitialDirections.Add(FVector(1.0f, 0.0f, 0.0f));
@@ -124,6 +133,68 @@ bool FGatherersMassProxyAuthorityAutomationTest::RunTest(const FString& Paramete
 			Food->Destroy();
 		}
 	}
+
+	MassSubsystem->ResetSimulation();
+	return true;
+}
+
+bool FGatherersMassRepresentationBridgeAutomationTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	TestNotNull(TEXT("editor world should exist"), World);
+
+	if (World == nullptr)
+	{
+		return false;
+	}
+
+	UGatherersMassSubsystem* MassSubsystem = World->GetSubsystem<UGatherersMassSubsystem>();
+	TestNotNull(TEXT("gatherers Mass subsystem should exist"), MassSubsystem);
+
+	UMassEntitySubsystem* MassEntitySubsystem = World->GetSubsystem<UMassEntitySubsystem>();
+	TestNotNull(TEXT("Mass entity subsystem should exist"), MassEntitySubsystem);
+
+	if (MassSubsystem == nullptr || MassEntitySubsystem == nullptr)
+	{
+		return false;
+	}
+
+	MassSubsystem->ResetSimulation();
+
+	FGatherersSpawnPlan Plan;
+	Plan.bUseFullSimulationMode = true;
+	Plan.PlayAreaBounds = FBox(FVector(-500.0f, -500.0f, -100.0f), FVector(500.0f, 500.0f, 100.0f));
+	Plan.AntSpawns.Add(FTransform(FVector::ZeroVector));
+	Plan.AntInitialDirections.Add(FVector(1.0f, 0.0f, 0.0f));
+	Plan.FoodSpawns.Add(FTransform(FVector(100.0f, 0.0f, 0.0f)));
+	Plan.bSpawnActorVisuals = false;
+
+	const FGatherersSpawnResult Result = SpawnGatherersActors(*World, Plan);
+	TestEqual(TEXT("Mass-instanced visual path should not spawn ant actors"), Result.Ants.Num(), 0);
+	TestEqual(TEXT("Mass-instanced visual path should not spawn food actors"), Result.Foods.Num(), 0);
+	TestEqual(TEXT("Mass subsystem tracks one ant entity"), MassSubsystem->GetManagedAntCount(), 1);
+	TestEqual(TEXT("Mass subsystem tracks one food entity"), MassSubsystem->GetManagedFoodCount(), 1);
+
+	if (MassSubsystem->ManagedAntEntities.Num() != 1)
+	{
+		return false;
+	}
+
+	FMassEntityManager& EntityManager = MassEntitySubsystem->GetMutableEntityManager();
+	FMassEntityView AntView(EntityManager, MassSubsystem->ManagedAntEntities[0]);
+	TestNotNull(
+		TEXT("Mass ant path should expose a dedicated ant instanced visual component"),
+		const_cast<UInstancedStaticMeshComponent*>(MassSubsystem->GetAntVisualComponent()));
+	TestNotNull(
+		TEXT("Mass food path should expose a dedicated food instanced visual component"),
+		const_cast<UInstancedStaticMeshComponent*>(MassSubsystem->GetFoodVisualComponent()));
+
+	MassSubsystem->Tick(0.1f);
+
+	const FGatherersMassAntFragment& AntFragment = AntView.GetFragmentData<FGatherersMassAntFragment>();
+	TestTrue(
+		TEXT("Mass ant can still advance without spawned actor proxies"),
+		AntFragment.Position.Equals(FVector(10.0f, 0.0f, 0.0f), 1.0f));
 
 	MassSubsystem->ResetSimulation();
 	return true;

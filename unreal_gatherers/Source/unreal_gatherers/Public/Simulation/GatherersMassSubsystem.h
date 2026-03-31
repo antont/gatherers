@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Components/InstancedStaticMeshComponent.h"
 #include "CoreMinimal.h"
 #include "MassEntityElementTypes.h"
 #include "MassEntityHandle.h"
@@ -8,7 +9,10 @@
 
 class AAnt;
 class AFood;
+class AActor;
 class UMassEntitySubsystem;
+class UMaterialInstanceDynamic;
+class UStaticMesh;
 struct FGatherersSpawnPlan;
 struct FGatherersSpawnResult;
 
@@ -65,8 +69,35 @@ public:
 	int32 GetManagedFoodCount() const;
 	bool HasManagedSimulation() const;
 	const FBox& GetSimulationBounds() const;
+	const UInstancedStaticMeshComponent* GetAntVisualComponent() const;
+	const UInstancedStaticMeshComponent* GetFoodVisualComponent() const;
 
+private:
+	bool EnsureVisualComponents();
+	void RebuildVisualInstances(UMassEntitySubsystem& MassEntitySubsystem);
+	void SyncVisualInstances(UMassEntitySubsystem& MassEntitySubsystem);
+
+public:
 	TArray<FMassEntityHandle> ManagedAntEntities;
 	TArray<FMassEntityHandle> ManagedFoodEntities;
 	FBox SimulationBounds = FBox(EForceInit::ForceInit);
+
+private:
+	UPROPERTY(Transient)
+	TObjectPtr<AActor> VisualizerActor = nullptr;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UInstancedStaticMeshComponent> AntVisualComponent = nullptr;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UInstancedStaticMeshComponent> FoodVisualComponent = nullptr;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UStaticMesh> VisualSphereMesh = nullptr;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInstanceDynamic> AntVisualMaterial = nullptr;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInstanceDynamic> FoodVisualMaterial = nullptr;
 };

@@ -1,5 +1,7 @@
 #include "Actors/Ant.h"
 #include "Editor.h"
+#include "MassEntitySubsystem.h"
+#include "MassEntityView.h"
 #include "Misc/AutomationTest.h"
 #include "Simulation/GatherersMassSubsystem.h"
 #include "Simulation/GatherersSpawnPlan.h"
@@ -37,9 +39,10 @@ bool FGatherersMassBoundaryAutomationTest::RunTest(const FString& Parameters)
 	Plan.AntInitialDirections.Add(FVector(1.0f, 0.0f, 0.0f));
 
 	const FGatherersSpawnResult Result = SpawnGatherersActors(*World, Plan);
-	TestEqual(TEXT("spawned ant proxies"), Result.Ants.Num(), 1);
+	TestEqual(TEXT("spawned ant actor count"), Result.Ants.Num(), 0);
+	TestEqual(TEXT("managed ant count"), MassSubsystem->GetManagedAntCount(), 1);
 
-	if (Result.Ants.Num() != 1)
+	if (MassSubsystem->GetManagedAntCount() != 1)
 	{
 		return false;
 	}
@@ -52,11 +55,20 @@ bool FGatherersMassBoundaryAutomationTest::RunTest(const FString& Parameters)
 	MassSubsystem->Tick(0.1f);
 	MassSubsystem->Tick(0.1f);
 
+	UMassEntitySubsystem* MassEntitySubsystem = World->GetSubsystem<UMassEntitySubsystem>();
+	TestNotNull(TEXT("Mass entity subsystem should exist"), MassEntitySubsystem);
+	if (MassEntitySubsystem == nullptr)
+	{
+		return false;
+	}
+
+	FMassEntityManager& EntityManager = MassEntitySubsystem->GetMutableEntityManager();
+	FMassEntityView AntView(EntityManager, MassSubsystem->ManagedAntEntities[0]);
+	const FGatherersMassAntFragment& AntFragment = AntView.GetFragmentData<FGatherersMassAntFragment>();
 	TestTrue(
 		TEXT("Mass-backed ant should stay within the play area and head back inward after the boundary hit"),
-		Result.Ants[0]->GetActorLocation().Equals(FVector(90.0f, 0.0f, 0.0f), 1.0f));
+		AntFragment.Position.Equals(FVector(90.0f, 0.0f, 0.0f), 1.0f));
 
-	Result.Ants[0]->Destroy();
 	MassSubsystem->ResetSimulation();
 	return true;
 }

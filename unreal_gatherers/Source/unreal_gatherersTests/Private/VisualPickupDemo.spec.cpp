@@ -1,5 +1,3 @@
-#include "Actors/Ant.h"
-#include "Actors/Food.h"
 #include "Editor.h"
 #include "FileHelpers.h"
 #include "HAL/PlatformTime.h"
@@ -71,23 +69,22 @@ public:
 		}
 
 		const FGatherersSpawnPlan Plan = BuildInitialGatherersSpawnPlan();
-		const GatherersWorldAssertions::FObservedWorldState WorldState = GatherersWorldAssertions::Observe(World);
-		AFood* AttachedFood = WorldState.GetFirstAttachedFood();
-		if (AttachedFood != nullptr)
+		const GatherersWorldAssertions::FObservedMassVisualState VisualState = GatherersWorldAssertions::ObserveMassVisuals(World);
+		if (VisualState.HasCarriedFoodVisual(20.0f))
 		{
-			bSawAttachedFood = true;
+			bSawCarriedFoodVisual = true;
 		}
 
-		if (WorldState.HasSingleAntAndTwoFoods() && bSawAttachedFood && AttachedFood == nullptr)
+		if (VisualState.HasSingleAntAndTwoFoods() && bSawCarriedFoodVisual && !VisualState.HasCarriedFoodVisual(20.0f))
 		{
-			GatherersWorldAssertions::AssertFirstDropState(*Test, WorldState, Plan, TEXT("visual"));
+			GatherersWorldAssertions::AssertMassFirstDropState(*Test, VisualState, Plan, TEXT("visual"));
 			return true;
 		}
 
 		const double NowSeconds = FPlatformTime::Seconds();
 		if (NowSeconds - StartTimeSeconds >= VisualTimeoutSeconds)
 		{
-			GatherersWorldAssertions::AssertFirstDropState(*Test, WorldState, Plan, TEXT("visual"));
+			GatherersWorldAssertions::AssertMassFirstDropState(*Test, VisualState, Plan, TEXT("visual"));
 			return true;
 		}
 
@@ -105,7 +102,7 @@ private:
 	FAutomationTestBase* Test;
 	double StartTimeSeconds;
 	double LastStepTimeSeconds;
-	bool bSawAttachedFood = false;
+	bool bSawCarriedFoodVisual = false;
 };
 }
 
@@ -141,12 +138,15 @@ bool FGatherersVisualPickupAutomationTest::RunTest(const FString& Parameters)
 
 	MassSubsystem->ResetSimulation();
 
-	const FGatherersSpawnPlan Plan = BuildInitialGatherersSpawnPlan();
+	FGatherersSpawnPlan Plan = BuildInitialGatherersSpawnPlan();
+	Plan.bSpawnActorVisuals = false;
 	const FGatherersSpawnResult Result = SpawnGatherersActors(*World, Plan);
-	TestEqual(TEXT("visual spawned ant count"), Result.Ants.Num(), 1);
-	TestEqual(TEXT("visual spawned food count"), Result.Foods.Num(), 2);
+	TestEqual(TEXT("visual spawned ant actor count"), Result.Ants.Num(), 0);
+	TestEqual(TEXT("visual spawned food actor count"), Result.Foods.Num(), 0);
+	TestEqual(TEXT("visual managed ant count"), MassSubsystem->GetManagedAntCount(), 1);
+	TestEqual(TEXT("visual managed food count"), MassSubsystem->GetManagedFoodCount(), 2);
 
-	if (Result.Ants.Num() != 1 || Result.Foods.Num() != 2)
+	if (MassSubsystem->GetManagedAntCount() != 1 || MassSubsystem->GetManagedFoodCount() != 2)
 	{
 		return false;
 	}

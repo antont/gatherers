@@ -1,6 +1,8 @@
 #include "Actors/Ant.h"
 #include "Actors/Food.h"
 #include "Editor.h"
+#include "MassEntitySubsystem.h"
+#include "MassEntityView.h"
 #include "Math/RandomStream.h"
 #include "Misc/AutomationTest.h"
 #include "Simulation/GatherersAntSimulation.h"
@@ -57,10 +59,12 @@ bool FGatherersMassRepeatAutomationTest::RunTest(const FString& Parameters)
 	Plan.FoodSpawns.Add(FTransform(RepeatPickupLocation));
 
 	const FGatherersSpawnResult Result = SpawnGatherersActors(*World, Plan);
-	TestEqual(TEXT("spawned ant proxies"), Result.Ants.Num(), 1);
-	TestEqual(TEXT("spawned food proxies"), Result.Foods.Num(), 3);
+	TestEqual(TEXT("spawned ant actor count"), Result.Ants.Num(), 0);
+	TestEqual(TEXT("spawned food actor count"), Result.Foods.Num(), 0);
+	TestEqual(TEXT("managed ant count"), MassSubsystem->GetManagedAntCount(), 1);
+	TestEqual(TEXT("managed food count"), MassSubsystem->GetManagedFoodCount(), 3);
 
-	if (Result.Ants.Num() != 1 || Result.Foods.Num() != 3)
+	if (MassSubsystem->GetManagedAntCount() != 1 || MassSubsystem->GetManagedFoodCount() != 3)
 	{
 		return false;
 	}
@@ -70,25 +74,25 @@ bool FGatherersMassRepeatAutomationTest::RunTest(const FString& Parameters)
 		MassSubsystem->Tick(0.1f);
 	}
 
-	int32 AttachedFoodCount = 0;
-	for (AFood* Food : Result.Foods)
+	UMassEntitySubsystem* MassEntitySubsystem = World->GetSubsystem<UMassEntitySubsystem>();
+	TestNotNull(TEXT("Mass entity subsystem should exist"), MassEntitySubsystem);
+	if (MassEntitySubsystem == nullptr)
 	{
-		if (Food != nullptr && Food->GetAttachParentActor() == Result.Ants[0])
-		{
-			++AttachedFoodCount;
-		}
+		return false;
 	}
 
-	TestEqual(TEXT("one food should be carried again after the cooldown window"), AttachedFoodCount, 1);
-
-	Result.Ants[0]->Destroy();
-	for (AFood* Food : Result.Foods)
+	FMassEntityManager& EntityManager = MassEntitySubsystem->GetMutableEntityManager();
+	int32 CarriedFoodCount = 0;
+	for (const FMassEntityHandle FoodEntity : MassSubsystem->ManagedFoodEntities)
 	{
-		if (Food != nullptr)
+		FMassEntityView FoodView(EntityManager, FoodEntity);
+		const FGatherersMassFoodFragment& FoodFragment = FoodView.GetFragmentData<FGatherersMassFoodFragment>();
+		if (!FoodFragment.bIsLoose)
 		{
-			Food->Destroy();
+			++CarriedFoodCount;
 		}
 	}
+	TestEqual(TEXT("one food should be carried again after the cooldown window"), CarriedFoodCount, 1);
 
 	MassSubsystem->ResetSimulation();
 	return true;

@@ -1,6 +1,8 @@
 #include "Actors/Ant.h"
 #include "Actors/Food.h"
 #include "Editor.h"
+#include "MassEntitySubsystem.h"
+#include "MassEntityView.h"
 #include "Math/RandomStream.h"
 #include "Misc/AutomationTest.h"
 #include "Simulation/GatherersAntSimulation.h"
@@ -51,10 +53,12 @@ bool FGatherersMassDropAutomationTest::RunTest(const FString& Parameters)
 	Plan.FoodSpawns.Add(FTransform(ExpectedDropLocation));
 
 	const FGatherersSpawnResult Result = SpawnGatherersActors(*World, Plan);
-	TestEqual(TEXT("spawned ant proxies"), Result.Ants.Num(), 1);
-	TestEqual(TEXT("spawned food proxies"), Result.Foods.Num(), 2);
+	TestEqual(TEXT("spawned ant actor count"), Result.Ants.Num(), 0);
+	TestEqual(TEXT("spawned food actor count"), Result.Foods.Num(), 0);
+	TestEqual(TEXT("managed ant count"), MassSubsystem->GetManagedAntCount(), 1);
+	TestEqual(TEXT("managed food count"), MassSubsystem->GetManagedFoodCount(), 2);
 
-	if (Result.Ants.Num() != 1 || Result.Foods.Num() != 2)
+	if (MassSubsystem->GetManagedAntCount() != 1 || MassSubsystem->GetManagedFoodCount() != 2)
 	{
 		return false;
 	}
@@ -62,13 +66,22 @@ bool FGatherersMassDropAutomationTest::RunTest(const FString& Parameters)
 	MassSubsystem->Tick(0.1f);
 	MassSubsystem->Tick(0.1f);
 
-	TestTrue(TEXT("first food should be loose again after the drop"), Result.Foods[0]->GetAttachParentActor() == nullptr);
-	TestTrue(TEXT("second food should stay loose in the world"), Result.Foods[1]->GetAttachParentActor() == nullptr);
-	TestTrue(TEXT("dropped food should appear at the deterministic turn-based drop location"), Result.Foods[0]->GetActorLocation().Equals(ExpectedDropLocation, 1.0f));
+	UMassEntitySubsystem* MassEntitySubsystem = World->GetSubsystem<UMassEntitySubsystem>();
+	TestNotNull(TEXT("Mass entity subsystem should exist"), MassEntitySubsystem);
+	if (MassEntitySubsystem == nullptr)
+	{
+		return false;
+	}
 
-	Result.Ants[0]->Destroy();
-	Result.Foods[0]->Destroy();
-	Result.Foods[1]->Destroy();
+	FMassEntityManager& EntityManager = MassEntitySubsystem->GetMutableEntityManager();
+	FMassEntityView FirstFoodView(EntityManager, MassSubsystem->ManagedFoodEntities[0]);
+	FMassEntityView SecondFoodView(EntityManager, MassSubsystem->ManagedFoodEntities[1]);
+	const FGatherersMassFoodFragment& FirstFoodFragment = FirstFoodView.GetFragmentData<FGatherersMassFoodFragment>();
+	const FGatherersMassFoodFragment& SecondFoodFragment = SecondFoodView.GetFragmentData<FGatherersMassFoodFragment>();
+	TestTrue(TEXT("first food should be loose again after the drop"), FirstFoodFragment.bIsLoose);
+	TestTrue(TEXT("second food should stay loose in the world"), SecondFoodFragment.bIsLoose);
+	TestTrue(TEXT("dropped food should appear at the deterministic turn-based drop location"), FirstFoodFragment.Position.Equals(ExpectedDropLocation, 1.0f));
+
 	MassSubsystem->ResetSimulation();
 	return true;
 }

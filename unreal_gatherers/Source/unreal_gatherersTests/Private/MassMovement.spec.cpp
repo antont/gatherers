@@ -1,6 +1,8 @@
 #include "Actors/Ant.h"
 #include "Actors/Food.h"
 #include "Editor.h"
+#include "MassEntitySubsystem.h"
+#include "MassEntityView.h"
 #include "Misc/AutomationTest.h"
 #include "Simulation/GatherersMassSubsystem.h"
 #include "Simulation/GatherersSpawnPlan.h"
@@ -39,9 +41,10 @@ bool FGatherersMassHeadingMovementAutomationTest::RunTest(const FString& Paramet
 	Plan.FoodSpawns.Add(FTransform(FVector(0.0f, 200.0f, 0.0f)));
 
 	const FGatherersSpawnResult Result = SpawnGatherersActors(*World, Plan);
-	TestEqual(TEXT("spawned ant proxies"), Result.Ants.Num(), 1);
+	TestEqual(TEXT("spawned ant actor count"), Result.Ants.Num(), 0);
+	TestEqual(TEXT("managed ant count"), MassSubsystem->GetManagedAntCount(), 1);
 
-	if (Result.Ants.Num() != 1)
+	if (MassSubsystem->GetManagedAntCount() != 1)
 	{
 		return false;
 	}
@@ -51,25 +54,19 @@ bool FGatherersMassHeadingMovementAutomationTest::RunTest(const FString& Paramet
 		MassSubsystem->Tick(0.1f);
 	}
 
+	UMassEntitySubsystem* MassEntitySubsystem = World->GetSubsystem<UMassEntitySubsystem>();
+	TestNotNull(TEXT("Mass entity subsystem should exist"), MassEntitySubsystem);
+	if (MassEntitySubsystem == nullptr)
+	{
+		return false;
+	}
+
+	FMassEntityManager& EntityManager = MassEntitySubsystem->GetMutableEntityManager();
+	FMassEntityView AntView(EntityManager, MassSubsystem->ManagedAntEntities[0]);
+	const FGatherersMassAntFragment& AntFragment = AntView.GetFragmentData<FGatherersMassAntFragment>();
 	TestTrue(
-		TEXT("Mass-backed ant proxy advances along its heading instead of seeking off-path food"),
-		Result.Ants[0]->GetActorLocation().Equals(FVector(50.0f, 0.0f, 0.0f), 1.0f));
-
-	for (AAnt* Ant : Result.Ants)
-	{
-		if (Ant != nullptr)
-		{
-			Ant->Destroy();
-		}
-	}
-
-	for (AFood* Food : Result.Foods)
-	{
-		if (Food != nullptr)
-		{
-			Food->Destroy();
-		}
-	}
+		TEXT("Mass-backed ant advances along its heading instead of seeking off-path food"),
+		AntFragment.Position.Equals(FVector(50.0f, 0.0f, 0.0f), 1.0f));
 
 	MassSubsystem->ResetSimulation();
 	return true;

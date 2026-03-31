@@ -1,6 +1,8 @@
 #include "Actors/Ant.h"
 #include "Actors/Food.h"
 #include "Editor.h"
+#include "MassEntitySubsystem.h"
+#include "MassEntityView.h"
 #include "Misc/AutomationTest.h"
 #include "Simulation/GatherersMassSubsystem.h"
 #include "Simulation/GatherersSpawnPlan.h"
@@ -39,20 +41,33 @@ bool FGatherersMassPickupAutomationTest::RunTest(const FString& Parameters)
 	Plan.FoodSpawns.Add(FTransform(FVector(8.0f, 0.0f, 0.0f)));
 
 	const FGatherersSpawnResult Result = SpawnGatherersActors(*World, Plan);
-	TestEqual(TEXT("spawned ant proxies"), Result.Ants.Num(), 1);
-	TestEqual(TEXT("spawned food proxies"), Result.Foods.Num(), 1);
+	TestEqual(TEXT("spawned ant actor count"), Result.Ants.Num(), 0);
+	TestEqual(TEXT("spawned food actor count"), Result.Foods.Num(), 0);
+	TestEqual(TEXT("managed ant count"), MassSubsystem->GetManagedAntCount(), 1);
+	TestEqual(TEXT("managed food count"), MassSubsystem->GetManagedFoodCount(), 1);
 
-	if (Result.Ants.Num() != 1 || Result.Foods.Num() != 1)
+	if (MassSubsystem->GetManagedAntCount() != 1 || MassSubsystem->GetManagedFoodCount() != 1)
 	{
 		return false;
 	}
 
 	MassSubsystem->Tick(0.1f);
 
-	TestTrue(TEXT("food proxy should now be attached to the ant proxy"), Result.Foods[0]->GetAttachParentActor() == Result.Ants[0]);
+	UMassEntitySubsystem* MassEntitySubsystem = World->GetSubsystem<UMassEntitySubsystem>();
+	TestNotNull(TEXT("Mass entity subsystem should exist"), MassEntitySubsystem);
+	if (MassEntitySubsystem == nullptr)
+	{
+		return false;
+	}
 
-	Result.Ants[0]->Destroy();
-	Result.Foods[0]->Destroy();
+	FMassEntityManager& EntityManager = MassEntitySubsystem->GetMutableEntityManager();
+	FMassEntityView AntView(EntityManager, MassSubsystem->ManagedAntEntities[0]);
+	FMassEntityView FoodView(EntityManager, MassSubsystem->ManagedFoodEntities[0]);
+	const FGatherersMassAntFragment& AntFragment = AntView.GetFragmentData<FGatherersMassAntFragment>();
+	const FGatherersMassFoodFragment& FoodFragment = FoodView.GetFragmentData<FGatherersMassFoodFragment>();
+	TestTrue(TEXT("Mass ant should now carry the food entity"), AntFragment.CarriedFoodEntity == MassSubsystem->ManagedFoodEntities[0]);
+	TestFalse(TEXT("picked-up food is no longer loose"), FoodFragment.bIsLoose);
+
 	MassSubsystem->ResetSimulation();
 	return true;
 }

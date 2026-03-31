@@ -14,6 +14,7 @@ FGatherersSpawnPlan BuildInitialGatherersSpawnPlan()
 {
 	FGatherersSpawnPlan Plan;
 	Plan.bUseFullSimulationMode = true;
+	Plan.bSpawnActorVisuals = false;
 	Plan.PlayAreaBounds = FBox(FVector(-500.0f, -500.0f, -100.0f), FVector(500.0f, 500.0f, 100.0f));
 	Plan.RandomSeedBase = 123;
 	Plan.FullSimulationTurnJitterRadians = 0.0f;
@@ -30,6 +31,7 @@ FGatherersSpawnPlan BuildDefaultGameFullSimulationSpawnPlan(
 {
 	FGatherersSpawnPlan Plan;
 	Plan.bUseFullSimulationMode = true;
+	Plan.bSpawnActorVisuals = false;
 	Plan.PlayAreaBounds = PlayAreaBounds;
 	Plan.RandomSeedBase = RandomSeed;
 
@@ -68,6 +70,7 @@ FGatherersSpawnPlan BuildFullSimulationSpawnPlan(
 {
 	FGatherersSpawnPlan Plan;
 	Plan.bUseFullSimulationMode = true;
+	Plan.bSpawnActorVisuals = false;
 	Plan.PlayAreaBounds = PlayAreaBounds;
 	Plan.RandomSeedBase = RandomSeed;
 
@@ -106,6 +109,7 @@ FGatherersSpawnPlan BuildFullSimulationVisualSpawnPlan()
 {
 	FGatherersSpawnPlan Plan;
 	Plan.bUseFullSimulationMode = true;
+	Plan.bSpawnActorVisuals = false;
 	Plan.PlayAreaBounds = FBox(FVector(-120.0f, -100.0f, -100.0f), FVector(120.0f, 100.0f, 100.0f));
 	Plan.RandomSeedBase = 123;
 	Plan.FullSimulationTurnJitterRadians = 0.0f;

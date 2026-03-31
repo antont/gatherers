@@ -2,6 +2,8 @@
 #include "Actors/Ant.h"
 #include "Actors/Food.h"
 #include "Editor.h"
+#include "MassEntitySubsystem.h"
+#include "MassEntityView.h"
 #include "Misc/AutomationTest.h"
 #include "Simulation/GatherersMassSubsystem.h"
 #include "Simulation/GatherersSpawnPlan.h"
@@ -60,10 +62,12 @@ bool FGatherersFullSimulationSpawnerAutomationTest::RunTest(const FString& Param
 	MassSubsystem->ResetSimulation();
 
 	const FGatherersSpawnResult Result = SpawnGatherersActors(*World, Plan);
-	TestEqual(TEXT("full-sim spawned ant count"), Result.Ants.Num(), 1);
-	TestEqual(TEXT("full-sim spawned food count"), Result.Foods.Num(), 1);
+	TestEqual(TEXT("full-sim spawned ant actor count"), Result.Ants.Num(), 0);
+	TestEqual(TEXT("full-sim spawned food actor count"), Result.Foods.Num(), 0);
+	TestEqual(TEXT("full-sim managed ant count"), MassSubsystem->GetManagedAntCount(), 1);
+	TestEqual(TEXT("full-sim managed food count"), MassSubsystem->GetManagedFoodCount(), 1);
 
-	if (Result.Ants.Num() != 1 || Result.Foods.Num() != 1)
+	if (MassSubsystem->GetManagedAntCount() != 1 || MassSubsystem->GetManagedFoodCount() != 1)
 	{
 		return false;
 	}
@@ -73,12 +77,20 @@ bool FGatherersFullSimulationSpawnerAutomationTest::RunTest(const FString& Param
 		MassSubsystem->Tick(0.1f);
 	}
 
+	UMassEntitySubsystem* MassEntitySubsystem = World->GetSubsystem<UMassEntitySubsystem>();
+	TestNotNull(TEXT("Mass entity subsystem should exist"), MassEntitySubsystem);
+	if (MassEntitySubsystem == nullptr)
+	{
+		return false;
+	}
+
+	FMassEntityManager& EntityManager = MassEntitySubsystem->GetMutableEntityManager();
+	FMassEntityView AntView(EntityManager, MassSubsystem->ManagedAntEntities[0]);
+	const FGatherersMassAntFragment& AntFragment = AntView.GetFragmentData<FGatherersMassAntFragment>();
 	TestTrue(
 		TEXT("world spawner routes spawned full-sim ant through Mass-backed heading movement instead of actor food seeking"),
-		Result.Ants[0]->GetActorLocation().Equals(FVector(50.0f, 0.0f, 0.0f), 1.0f));
+		AntFragment.Position.Equals(FVector(50.0f, 0.0f, 0.0f), 1.0f));
 
-	Result.Ants[0]->Destroy();
-	Result.Foods[0]->Destroy();
 	MassSubsystem->ResetSimulation();
 	return true;
 }
