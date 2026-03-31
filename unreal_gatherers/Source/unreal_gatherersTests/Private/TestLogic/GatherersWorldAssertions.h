@@ -15,9 +15,10 @@ struct FObservedWorldState
 	TArray<AAnt*> Ants;
 	TArray<AFood*> Foods;
 
-	bool HasSingleAntAndFood() const;
+	bool HasSingleAntAndTwoFoods() const;
 	AAnt* GetSingleAnt() const;
-	AFood* GetSingleFood() const;
+	int32 CountAttachedFoods() const;
+	AFood* GetFirstAttachedFood() const;
 };
 
 FObservedWorldState Observe(UWorld* World);
@@ -39,6 +40,13 @@ bool PollForPIEToEnd(
 	const FString& LabelPrefix);
 
 void AssertPickupState(
+	FAutomationTestBase& Test,
+	const FObservedWorldState& WorldState,
+	const FGatherersSpawnPlan& Plan,
+	const FString& LabelPrefix,
+	float PositionTolerance = KINDA_SMALL_NUMBER);
+
+void AssertFirstDropState(
 	FAutomationTestBase& Test,
 	const FObservedWorldState& WorldState,
 	const FGatherersSpawnPlan& Plan,

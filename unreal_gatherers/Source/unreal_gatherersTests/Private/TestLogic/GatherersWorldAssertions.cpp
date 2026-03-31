@@ -11,9 +11,9 @@
 
 namespace GatherersWorldAssertions
 {
-bool FObservedWorldState::HasSingleAntAndFood() const
+bool FObservedWorldState::HasSingleAntAndTwoFoods() const
 {
-	return Ants.Num() == 1 && Foods.Num() == 1;
+	return Ants.Num() == 1 && Foods.Num() == 2;
 }
 
 AAnt* FObservedWorldState::GetSingleAnt() const
@@ -21,9 +21,31 @@ AAnt* FObservedWorldState::GetSingleAnt() const
 	return Ants.Num() == 1 ? Ants[0] : nullptr;
 }
 
-AFood* FObservedWorldState::GetSingleFood() const
+int32 FObservedWorldState::CountAttachedFoods() const
 {
-	return Foods.Num() == 1 ? Foods[0] : nullptr;
+	int32 AttachedFoodCount = 0;
+	for (AFood* Food : Foods)
+	{
+		if (Food != nullptr && Food->GetAttachParentActor() != nullptr)
+		{
+			++AttachedFoodCount;
+		}
+	}
+
+	return AttachedFoodCount;
+}
+
+AFood* FObservedWorldState::GetFirstAttachedFood() const
+{
+	for (AFood* Food : Foods)
+	{
+		if (Food != nullptr && Food->GetAttachParentActor() != nullptr)
+		{
+			return Food;
+		}
+	}
+
+	return nullptr;
 }
 
 FObservedWorldState Observe(UWorld* World)
@@ -56,22 +78,61 @@ void AssertPickupState(
 {
 	const FString CountPrefix = LabelPrefix.IsEmpty() ? TEXT("") : LabelPrefix + TEXT(" ");
 	Test.TestEqual(*(CountPrefix + TEXT("ant count")), WorldState.Ants.Num(), 1);
-	Test.TestEqual(*(CountPrefix + TEXT("food count")), WorldState.Foods.Num(), 1);
+	Test.TestEqual(*(CountPrefix + TEXT("food count")), WorldState.Foods.Num(), 2);
 
 	AAnt* Ant = WorldState.GetSingleAnt();
-	AFood* Food = WorldState.GetSingleFood();
-	if (Ant == nullptr || Food == nullptr)
+	AFood* AttachedFood = WorldState.GetFirstAttachedFood();
+	if (Ant == nullptr || AttachedFood == nullptr)
 	{
 		return;
 	}
 
-	Test.TestTrue(*(CountPrefix + TEXT("food attaches to the ant")), Food->GetAttachParentActor() == Ant);
+	Test.TestEqual(*(CountPrefix + TEXT("attached food count")), WorldState.CountAttachedFoods(), 1);
+	Test.TestTrue(*(CountPrefix + TEXT("one food attaches to the ant")), AttachedFood->GetAttachParentActor() == Ant);
 	Test.TestTrue(
 		*(CountPrefix + TEXT("ant moves from its spawn point")),
 		!Ant->GetActorLocation().Equals(Plan.AntSpawns[0].GetLocation(), PositionTolerance));
 	Test.TestTrue(
-		*(CountPrefix + TEXT("food no longer remains at its spawn point")),
-		!Food->GetActorLocation().Equals(Plan.FoodSpawns[0].GetLocation(), PositionTolerance));
+		*(CountPrefix + TEXT("attached food no longer remains at the forward spawn point")),
+		!AttachedFood->GetActorLocation().Equals(Plan.FoodSpawns[0].GetLocation(), PositionTolerance));
+}
+
+void AssertFirstDropState(
+	FAutomationTestBase& Test,
+	const FObservedWorldState& WorldState,
+	const FGatherersSpawnPlan& Plan,
+	const FString& LabelPrefix,
+	float PositionTolerance)
+{
+	const FString CountPrefix = LabelPrefix.IsEmpty() ? TEXT("") : LabelPrefix + TEXT(" ");
+	Test.TestEqual(*(CountPrefix + TEXT("ant count")), WorldState.Ants.Num(), 1);
+	Test.TestEqual(*(CountPrefix + TEXT("food count")), WorldState.Foods.Num(), 2);
+	Test.TestEqual(*(CountPrefix + TEXT("attached food count after first drop")), WorldState.CountAttachedFoods(), 0);
+
+	AAnt* Ant = WorldState.GetSingleAnt();
+	if (Ant == nullptr)
+	{
+		return;
+	}
+
+	bool bFoundDroppedFoodAwayFromForwardSpawn = false;
+	for (AFood* Food : WorldState.Foods)
+	{
+		if (Food == nullptr)
+		{
+			continue;
+		}
+
+		bFoundDroppedFoodAwayFromForwardSpawn |=
+			!Food->GetActorLocation().Equals(Plan.FoodSpawns[0].GetLocation(), PositionTolerance);
+	}
+
+	Test.TestTrue(
+		*(CountPrefix + TEXT("ant moved from its spawn point before the first drop")),
+		!Ant->GetActorLocation().Equals(Plan.AntSpawns[0].GetLocation(), PositionTolerance));
+	Test.TestTrue(
+		*(CountPrefix + TEXT("one loose food sits away from the original forward spawn after the first drop")),
+		bFoundDroppedFoodAwayFromForwardSpawn);
 }
 
 bool PollForPickupState(
@@ -91,12 +152,14 @@ bool PollForPickupState(
 
 	const FObservedWorldState WorldState = Observe(World);
 	AAnt* Ant = WorldState.GetSingleAnt();
-	AFood* Food = WorldState.GetSingleFood();
+	AFood* AttachedFood = WorldState.GetFirstAttachedFood();
 
-	const bool bHasExpectedCounts = WorldState.HasSingleAntAndFood();
+	const bool bHasExpectedCounts = WorldState.HasSingleAntAndTwoFoods();
 	const bool bAntMoved = Ant != nullptr
 		&& !Ant->GetActorLocation().Equals(Plan.AntSpawns[0].GetLocation(), PositionTolerance);
-	const bool bFoodAttachedToAnt = Ant != nullptr && Food != nullptr && Food->GetAttachParentActor() == Ant;
+	const bool bFoodAttachedToAnt = Ant != nullptr && AttachedFood != nullptr
+		&& AttachedFood->GetAttachParentActor() == Ant
+		&& WorldState.CountAttachedFoods() == 1;
 
 	if (!(bHasExpectedCounts && bAntMoved && bFoodAttachedToAnt))
 	{
