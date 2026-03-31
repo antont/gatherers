@@ -10,6 +10,43 @@
 #include "Simulation/GatherersSpawnPlan.h"
 #include "Simulation/GatherersWorldSpawner.h"
 
+namespace
+{
+constexpr float MassPickupRadius = 15.0f;
+constexpr float MassCarriedFoodHeight = 20.0f;
+
+FGatherersMassFoodFragment* FindLooseFoodInPickupRadius(
+	FMassEntityManager& EntityManager,
+	const TArray<FMassEntityHandle>& FoodEntities,
+	const FVector& AntPosition,
+	FMassEntityHandle& OutFoodEntity)
+{
+	for (const FMassEntityHandle FoodEntity : FoodEntities)
+	{
+		if (!EntityManager.IsEntityValid(FoodEntity))
+		{
+			continue;
+		}
+
+		FMassEntityView FoodView(EntityManager, FoodEntity);
+		FGatherersMassFoodFragment& FoodFragment = FoodView.GetFragmentData<FGatherersMassFoodFragment>();
+		if (!FoodFragment.bIsLoose)
+		{
+			continue;
+		}
+
+		if (ShouldAntPickUpFood(AntPosition, FoodFragment.Position, MassPickupRadius))
+		{
+			OutFoodEntity = FoodEntity;
+			return &FoodFragment;
+		}
+	}
+
+	OutFoodEntity.Reset();
+	return nullptr;
+}
+}
+
 void UGatherersMassSubsystem::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
@@ -51,9 +88,34 @@ void UGatherersMassSubsystem::Tick(float DeltaTime)
 			18.0f,
 			DeltaTime);
 
+		if (!AntFragment.CarriedFoodEntity.IsValid() && AntFragment.PickupCooldownRemainingSeconds <= 0.0f)
+		{
+			FMassEntityHandle NearbyFoodEntity;
+			if (FGatherersMassFoodFragment* NearbyFood = FindLooseFoodInPickupRadius(
+				EntityManager,
+				ManagedFoodEntities,
+				AntFragment.Position,
+				NearbyFoodEntity))
+			{
+				AntFragment.CarriedFoodEntity = NearbyFoodEntity;
+				NearbyFood->bIsLoose = false;
+			}
+		}
+
 		if (AAnt* AntProxy = AntFragment.ProxyActor.Get())
 		{
 			AntProxy->SetActorLocation(AntFragment.Position);
+
+			if (AntFragment.CarriedFoodEntity.IsValid() && EntityManager.IsEntityValid(AntFragment.CarriedFoodEntity))
+			{
+				FMassEntityView FoodView(EntityManager, AntFragment.CarriedFoodEntity);
+				FGatherersMassFoodFragment& FoodFragment = FoodView.GetFragmentData<FGatherersMassFoodFragment>();
+				if (AFood* FoodProxy = FoodFragment.ProxyActor.Get())
+				{
+					FoodProxy->AttachToComponent(AntProxy->GetRootComponent(), FAttachmentTransformRules::KeepWorldTransform);
+					FoodProxy->SetActorRelativeLocation(ComputeCarriedFoodRelativeLocation(MassCarriedFoodHeight));
+				}
+			}
 		}
 	}
 }
