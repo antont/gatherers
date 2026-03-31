@@ -43,4 +43,8 @@ UNREAL_GATHERERS_API float ComputeRemainingPickupCooldown(
 	float CurrentCooldownSeconds,
 	float DeltaSeconds);
 
+UNREAL_GATHERERS_API float ComputePickupCooldownForSeparationDistance(
+	float DesiredSeparationDistance,
+	float MovementSpeed);
+
 UNREAL_GATHERERS_API FVector ComputeCarriedFoodRelativeLocation(float CarriedFoodHeight);

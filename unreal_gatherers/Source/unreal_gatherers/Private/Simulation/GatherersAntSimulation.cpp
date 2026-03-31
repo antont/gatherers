@@ -107,6 +107,19 @@ float ComputeRemainingPickupCooldown(
 	return FMath::Max(0.0f, CurrentCooldownSeconds - FMath::Max(0.0f, DeltaSeconds));
 }
 
+float ComputePickupCooldownForSeparationDistance(
+	float DesiredSeparationDistance,
+	float MovementSpeed)
+{
+	const float SafeMovementSpeed = FMath::Max(0.0f, MovementSpeed);
+	if (SafeMovementSpeed <= KINDA_SMALL_NUMBER)
+	{
+		return 0.0f;
+	}
+
+	return FMath::Max(0.0f, DesiredSeparationDistance) / SafeMovementSpeed;
+}
+
 FVector ComputeCarriedFoodRelativeLocation(float CarriedFoodHeight)
 {
 	return FVector(0.0f, 0.0f, CarriedFoodHeight);
