@@ -2,12 +2,56 @@
 
 #include "Math/RandomStream.h"
 
+namespace
+{
+constexpr int32 RustFoodCount = 80;
+constexpr int32 RustAntSpawnStep = 50;
+constexpr float RustAntSpawnY = 100.0f;
+constexpr float SpawnZ = 50.0f;
+}
+
 FGatherersSpawnPlan BuildInitialGatherersSpawnPlan()
 {
 	FGatherersSpawnPlan Plan;
 	Plan.AntSpawns.Add(FTransform(FVector(0.0f, 0.0f, 50.0f)));
 	Plan.FoodSpawns.Add(FTransform(FVector(200.0f, 0.0f, 50.0f)));
 	Plan.FoodSpawns.Add(FTransform(FVector(-200.0f, 0.0f, 50.0f)));
+	return Plan;
+}
+
+FGatherersSpawnPlan BuildDefaultGameFullSimulationSpawnPlan(
+	const FBox& PlayAreaBounds,
+	int32 RandomSeed)
+{
+	FGatherersSpawnPlan Plan;
+	Plan.bUseFullSimulationMode = true;
+	Plan.PlayAreaBounds = PlayAreaBounds;
+	Plan.RandomSeedBase = RandomSeed;
+
+	FRandomStream RandomStream(RandomSeed);
+	const FVector BoundsCenter = PlayAreaBounds.GetCenter();
+	const FVector BoundsExtent = PlayAreaBounds.GetExtent();
+	const int32 HalfX = static_cast<int32>(BoundsExtent.X);
+	const int32 HalfY = static_cast<int32>(BoundsExtent.Y);
+
+	for (int32 AntX = -HalfX; AntX < HalfX; AntX += RustAntSpawnStep)
+	{
+		Plan.AntSpawns.Add(FTransform(FVector(BoundsCenter.X + static_cast<float>(AntX), BoundsCenter.Y + RustAntSpawnY, SpawnZ)));
+
+		const float HeadingAngle = RandomStream.FRandRange(0.0f, 2.0f * PI);
+		Plan.AntInitialDirections.Add(FVector(FMath::Cos(HeadingAngle), FMath::Sin(HeadingAngle), 0.0f));
+	}
+
+	for (int32 FoodIndex = 0; FoodIndex < RustFoodCount; ++FoodIndex)
+	{
+		const int32 FoodX = RandomStream.RandRange(-HalfX, HalfX - 1);
+		const int32 FoodY = RandomStream.RandRange(-HalfY, HalfY - 1);
+		Plan.FoodSpawns.Add(FTransform(FVector(
+			BoundsCenter.X + static_cast<float>(FoodX),
+			BoundsCenter.Y + static_cast<float>(FoodY),
+			SpawnZ)));
+	}
+
 	return Plan;
 }
 
