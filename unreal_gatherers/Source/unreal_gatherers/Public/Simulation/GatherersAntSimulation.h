@@ -47,4 +47,8 @@ UNREAL_GATHERERS_API float ComputePickupCooldownForSeparationDistance(
 	float DesiredSeparationDistance,
 	float MovementSpeed);
 
+UNREAL_GATHERERS_API FVector ComputeBoundaryTurnBackDirection(
+	const FVector& CurrentDirection,
+	const FVector& InwardBoundaryNormal);
+
 UNREAL_GATHERERS_API FVector ComputeCarriedFoodRelativeLocation(float CarriedFoodHeight);

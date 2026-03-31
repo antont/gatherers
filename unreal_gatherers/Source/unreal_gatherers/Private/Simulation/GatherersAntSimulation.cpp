@@ -120,6 +120,21 @@ float ComputePickupCooldownForSeparationDistance(
 	return FMath::Max(0.0f, DesiredSeparationDistance) / SafeMovementSpeed;
 }
 
+FVector ComputeBoundaryTurnBackDirection(
+	const FVector& CurrentDirection,
+	const FVector& InwardBoundaryNormal)
+{
+	const FVector SafeDirection = CurrentDirection.GetSafeNormal();
+	const FVector SafeNormal = InwardBoundaryNormal.GetSafeNormal();
+	if (SafeDirection.IsNearlyZero() || SafeNormal.IsNearlyZero())
+	{
+		return FVector::ZeroVector;
+	}
+
+	const FVector ReflectedDirection = SafeDirection - 2.0f * FVector::DotProduct(SafeDirection, SafeNormal) * SafeNormal;
+	return ReflectedDirection.GetSafeNormal();
+}
+
 FVector ComputeCarriedFoodRelativeLocation(float CarriedFoodHeight)
 {
 	return FVector(0.0f, 0.0f, CarriedFoodHeight);
