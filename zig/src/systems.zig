@@ -520,3 +520,53 @@ test "ant hits: ant with cooldown ignores hits" {
     // Food should still be collidable (not picked up)
     try std.testing.expect(ecs.has_id(world, food, ecs.id(components.Collidable)));
 }
+
+// =============================================================================
+// Cooldown System Tests
+// =============================================================================
+
+test "cooldown: timer decrements by delta" {
+    const world = createTestWorld();
+    defer _ = ecs.fini(world);
+
+    const ant = spawnTestAnt(world, 0.0, 0.0, 1.0, 0.0);
+    _ = ecs.set(world, ant, Cooldown, .{ .timer = 1.0 });
+
+    cooldownSystem(world, 0.3);
+
+    const cd = ecs.get(world, ant, Cooldown).?;
+    try std.testing.expectApproxEqAbs(@as(f32, 0.7), cd.timer, 0.01);
+}
+
+test "cooldown: removed when timer expires" {
+    const world = createTestWorld();
+    defer _ = ecs.fini(world);
+
+    const ant = spawnTestAnt(world, 0.0, 0.0, 1.0, 0.0);
+    _ = ecs.set(world, ant, Cooldown, .{ .timer = 0.5 });
+
+    cooldownSystem(world, 0.6); // 0.5 - 0.6 = -0.1 → should be removed
+
+    const cd = ecs.get(world, ant, Cooldown);
+    try std.testing.expect(cd == null);
+}
+
+test "cooldown: multiple ticks to expire" {
+    const world = createTestWorld();
+    defer _ = ecs.fini(world);
+
+    const ant = spawnTestAnt(world, 0.0, 0.0, 1.0, 0.0);
+    _ = ecs.set(world, ant, Cooldown, .{ .timer = 1.0 });
+
+    cooldownSystem(world, 0.3); // 1.0 → 0.7
+    try std.testing.expect(ecs.get(world, ant, Cooldown) != null);
+
+    cooldownSystem(world, 0.3); // 0.7 → 0.4
+    try std.testing.expect(ecs.get(world, ant, Cooldown) != null);
+
+    cooldownSystem(world, 0.3); // 0.4 → 0.1
+    try std.testing.expect(ecs.get(world, ant, Cooldown) != null);
+
+    cooldownSystem(world, 0.3); // 0.1 → -0.2 → removed
+    try std.testing.expect(ecs.get(world, ant, Cooldown) == null);
+}
