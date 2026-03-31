@@ -222,3 +222,74 @@ test "boundary wrap: vertical wrapping" {
     const pos = ecs.get(world, ant, Position).?;
     try std.testing.expect(pos.y < 0); // Wrapped to bottom
 }
+
+// =============================================================================
+// Collision Detection Tests
+// =============================================================================
+
+test "collision: ant near food produces hit event" {
+    const world = createTestWorld();
+    defer _ = ecs.fini(world);
+
+    const ant = spawnTestAnt(world, 5.0, 0.0, 1.0, 0.0);
+    const food = spawnTestFood(world, 10.0, 0.0);
+
+    var si = SpatialIndex.init(std.testing.allocator);
+    defer si.deinit();
+    var hits = std.ArrayList(HitEvent).init(std.testing.allocator);
+    defer hits.deinit();
+
+    // Build spatial index with food
+    const food_pos = ecs.get(world, food, Position).?;
+    try si.insert(food, food_pos.x, food_pos.y);
+
+    collisionDetectionSystem(world, &si, &hits);
+
+    try std.testing.expectEqual(@as(usize, 1), hits.items.len);
+    try std.testing.expectEqual(ant, hits.items[0].ant);
+    try std.testing.expectEqual(food, hits.items[0].food);
+}
+
+test "collision: ant far from food produces no hit" {
+    const world = createTestWorld();
+    defer _ = ecs.fini(world);
+
+    _ = spawnTestAnt(world, 0.0, 0.0, 1.0, 0.0);
+    const food = spawnTestFood(world, 500.0, 500.0);
+
+    var si = SpatialIndex.init(std.testing.allocator);
+    defer si.deinit();
+    var hits = std.ArrayList(HitEvent).init(std.testing.allocator);
+    defer hits.deinit();
+
+    const food_pos = ecs.get(world, food, Position).?;
+    try si.insert(food, food_pos.x, food_pos.y);
+
+    collisionDetectionSystem(world, &si, &hits);
+
+    try std.testing.expectEqual(@as(usize, 0), hits.items.len);
+}
+
+test "collision: only one hit per ant per frame" {
+    const world = createTestWorld();
+    defer _ = ecs.fini(world);
+
+    _ = spawnTestAnt(world, 0.0, 0.0, 1.0, 0.0);
+    const food1 = spawnTestFood(world, 5.0, 0.0);
+    const food2 = spawnTestFood(world, -5.0, 0.0);
+
+    var si = SpatialIndex.init(std.testing.allocator);
+    defer si.deinit();
+    var hits = std.ArrayList(HitEvent).init(std.testing.allocator);
+    defer hits.deinit();
+
+    const f1_pos = ecs.get(world, food1, Position).?;
+    const f2_pos = ecs.get(world, food2, Position).?;
+    try si.insert(food1, f1_pos.x, f1_pos.y);
+    try si.insert(food2, f2_pos.x, f2_pos.y);
+
+    collisionDetectionSystem(world, &si, &hits);
+
+    // Should only get 1 hit even though 2 foods are nearby
+    try std.testing.expectEqual(@as(usize, 1), hits.items.len);
+}
