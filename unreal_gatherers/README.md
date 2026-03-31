@@ -7,9 +7,10 @@ Unreal 5.7 port of the `gatherers` simulation.
 Current implemented slice:
 
 - editor-only automation test module
-- random full-simulation game startup path with Rust-like ant row spacing and food count
+- random full-simulation game startup path with Rust-like ant row spacing and food count, now backed by Mass-managed sim state with actor proxies
 - preserved deterministic gather-demo path with one ant and two foods for explicit test/manual fixtures
-- separate full-simulation path with heading-based movement, pickup/drop, cooldown, and border turn-back
+- preserved actor-backed full-simulation fixture path for comparison and regression tests
+- separate Mass-backed full-simulation path with heading-based movement, pickup/drop, cooldown, repeated gathering, and border turn-back
 - startup integration through `Aunreal_gatherersGameModeBase`
 - standalone `-game` launch into `SimBlank`
 - separate visual/manual editor inspection paths for the deterministic demo and the new full simulation
@@ -57,6 +58,7 @@ Useful targeted reruns:
 -ExecCmds="Automation RunTest default.unreal_gatherers.Simulation.AntDropsFoodBackIntoWorld;Quit"
 -ExecCmds="Automation RunTest default.unreal_gatherers.Simulation.AntDropsFoodTwiceInSameEditorSession;Quit"
 -ExecCmds="Automation RunTest default.unreal_gatherers.FullSimulation;Quit"
+-ExecCmds="Automation RunTest default.unreal_gatherers.Mass;Quit"
 -ExecCmds="Automation RunTest supplemental.unreal_gatherers.Spawning.StartupSmokeSpawnsRustLikeFullSimulationCounts;Quit"
 ```
 
@@ -106,5 +108,6 @@ and spawn the random full-simulation path by default:
 - 80 food actors at random positions
 - a Rust-like row of ants spaced 50 units apart across the play area
 - random initial headings for those ants
+- Mass-managed ant/food simulation state synchronized into the spawned actors
 
-The old one-ant/two-food deterministic setup is still preserved, but only when a test or manual harness explicitly asks for `BuildInitialGatherersSpawnPlan()`.
+The old one-ant/two-food deterministic setup is still preserved, and the actor-backed full-simulation fixtures are preserved too, but only when a test or manual harness explicitly asks for those non-Mass spawn builders.
