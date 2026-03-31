@@ -97,3 +97,21 @@ bool FGatherersCarriedFoodOffsetAutomationTest::RunTest(const FString& Parameter
 		CarriedFoodOffset.Equals(FVector(0.0f, 0.0f, 20.0f), KINDA_SMALL_NUMBER));
 	return true;
 }
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FGatherersHeadingMovementStepAutomationTest,
+	"default.unreal_gatherers.Simulation.FullSimHeadingMovementUsesSafeStepCap",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FGatherersHeadingMovementStepAutomationTest::RunTest(const FString& Parameters)
+{
+	const FVector CurrentLocation(0.0f, 0.0f, 0.0f);
+	const FVector HeadingDirection(1.0f, 0.0f, 0.0f);
+
+	const FVector NextLocation = ComputeAntHeadingMovementStep(CurrentLocation, HeadingDirection, 1000.0f, 18.0f, 0.1f);
+
+	TestTrue(
+		TEXT("full-sim movement clamps to the safe step distance instead of tunneling past it"),
+		NextLocation.Equals(FVector(18.0f, 0.0f, 0.0f), KINDA_SMALL_NUMBER));
+	return true;
+}
