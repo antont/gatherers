@@ -147,3 +147,21 @@ bool FGatherersPickupSeparationCooldownAutomationTest::RunTest(const FString& Pa
 		0.5f);
 	return true;
 }
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FGatherersBoundaryTurnBackAutomationTest,
+	"default.unreal_gatherers.Simulation.FullSimBoundaryTurnBackReflectsHeadingInward",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FGatherersBoundaryTurnBackAutomationTest::RunTest(const FString& Parameters)
+{
+	const FVector CurrentDirection(1.0f, 0.0f, 0.0f);
+	const FVector InwardBoundaryNormal(-1.0f, 0.0f, 0.0f);
+
+	const FVector TurnedDirection = ComputeBoundaryTurnBackDirection(CurrentDirection, InwardBoundaryNormal);
+
+	TestTrue(
+		TEXT("boundary turn-back reflects the heading back into the play area"),
+		TurnedDirection.Equals(FVector(-1.0f, 0.0f, 0.0f), KINDA_SMALL_NUMBER));
+	return true;
+}
