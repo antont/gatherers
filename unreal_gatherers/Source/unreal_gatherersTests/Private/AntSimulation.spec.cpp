@@ -115,3 +115,19 @@ bool FGatherersHeadingMovementStepAutomationTest::RunTest(const FString& Paramet
 		NextLocation.Equals(FVector(18.0f, 0.0f, 0.0f), KINDA_SMALL_NUMBER));
 	return true;
 }
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FGatherersFullSimTurnDirectionAutomationTest,
+	"default.unreal_gatherers.Simulation.FullSimTurnDirectionUsesAboutFacePlusBoundedJitter",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FGatherersFullSimTurnDirectionAutomationTest::RunTest(const FString& Parameters)
+{
+	const FVector CurrentDirection(1.0f, 0.0f, 0.0f);
+	const FVector TurnedDirection = ComputeAntTurnDirection(CurrentDirection, 1.0f, PI / 2.0f);
+
+	TestTrue(
+		TEXT("full-sim pickup/drop turn can rotate up to the positive jitter bound around an about-face turn"),
+		TurnedDirection.Equals(FVector(0.0f, -1.0f, 0.0f), KINDA_SMALL_NUMBER));
+	return true;
+}
