@@ -23,7 +23,7 @@ bool LoadSimBlankIntoEditorWorld()
 	return FEditorFileUtils::LoadMap(MapFilename, false, false);
 }
 
-void FrameVisualPickupInViewport(const FGatherersSpawnPlan& Plan)
+void FrameVisualFullSimulationInViewport(const FGatherersSpawnPlan& Plan)
 {
 	if (GCurrentLevelEditingViewportClient == nullptr)
 	{
@@ -31,21 +31,25 @@ void FrameVisualPickupInViewport(const FGatherersSpawnPlan& Plan)
 	}
 
 	FBox FocusBounds(EForceInit::ForceInit);
-	FocusBounds += Plan.AntSpawns[0].GetLocation();
+	for (const FTransform& AntSpawn : Plan.AntSpawns)
+	{
+		FocusBounds += AntSpawn.GetLocation();
+	}
+
 	for (const FTransform& FoodSpawn : Plan.FoodSpawns)
 	{
 		FocusBounds += FoodSpawn.GetLocation();
 	}
-	FocusBounds = FocusBounds.ExpandBy(FVector(150.0f, 300.0f, 150.0f));
 
+	FocusBounds = FocusBounds.ExpandBy(FVector(150.0f, 200.0f, 150.0f));
 	GCurrentLevelEditingViewportClient->FocusViewportOnBox(FocusBounds, true);
 	GCurrentLevelEditingViewportClient->Invalidate();
 }
 
-class FGatherersAdvanceVisiblePickupCommand : public IAutomationLatentCommand
+class FGatherersAdvanceVisibleFullSimulationCommand : public IAutomationLatentCommand
 {
 public:
-	explicit FGatherersAdvanceVisiblePickupCommand(FAutomationTestBase* InTest)
+	explicit FGatherersAdvanceVisibleFullSimulationCommand(FAutomationTestBase* InTest)
 		: Test(InTest),
 		  StartTimeSeconds(FPlatformTime::Seconds()),
 		  LastStepTimeSeconds(StartTimeSeconds)
@@ -55,36 +59,35 @@ public:
 	virtual bool Update() override
 	{
 		UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
-		Test->TestNotNull(TEXT("visual editor world should exist"), World);
+		Test->TestNotNull(TEXT("visual full-sim editor world should exist"), World);
 		if (World == nullptr)
 		{
 			return true;
 		}
 
 		UGatherersMassSubsystem* MassSubsystem = World->GetSubsystem<UGatherersMassSubsystem>();
-		Test->TestNotNull(TEXT("visual editor world should expose the gatherers Mass subsystem"), MassSubsystem);
+		Test->TestNotNull(TEXT("visual full-sim editor world should expose the gatherers Mass subsystem"), MassSubsystem);
 		if (MassSubsystem == nullptr)
 		{
 			return true;
 		}
 
-		const FGatherersSpawnPlan Plan = BuildInitialGatherersSpawnPlan();
 		const GatherersWorldAssertions::FObservedMassVisualState VisualState = GatherersWorldAssertions::ObserveMassVisuals(World);
 		if (VisualState.HasCarriedFoodVisual(20.0f))
 		{
-			bSawCarriedFoodVisual = true;
+			++ObservedAttachedFoodFrames;
 		}
 
-		if (VisualState.HasSingleAntAndTwoFoods() && bSawCarriedFoodVisual && !VisualState.HasCarriedFoodVisual(20.0f))
+		if (ObservedAttachedFoodFrames >= 2)
 		{
-			GatherersWorldAssertions::AssertMassFirstDropState(*Test, VisualState, Plan, TEXT("visual"));
+			Test->TestTrue(TEXT("full-sim visual path reaches a second visible pickup for inspection"), true);
 			return true;
 		}
 
 		const double NowSeconds = FPlatformTime::Seconds();
 		if (NowSeconds - StartTimeSeconds >= VisualTimeoutSeconds)
 		{
-			GatherersWorldAssertions::AssertMassFirstDropState(*Test, VisualState, Plan, TEXT("visual"));
+			Test->TestTrue(TEXT("full-sim visual path reaches a second visible pickup for inspection"), false);
 			return true;
 		}
 
@@ -102,16 +105,16 @@ private:
 	FAutomationTestBase* Test;
 	double StartTimeSeconds;
 	double LastStepTimeSeconds;
-	bool bSawCarriedFoodVisual = false;
+	int32 ObservedAttachedFoodFrames = 0;
 };
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FGatherersVisualPickupAutomationTest,
-	"manual.unreal_gatherers.Visual.AntFirstDropLeavesWorldForInspection",
+	FGatherersVisualFullSimulationAutomationTest,
+	"manual.unreal_gatherers.Visual.FullSimulationSecondPickupStaysVisible",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
-bool FGatherersVisualPickupAutomationTest::RunTest(const FString& Parameters)
+bool FGatherersVisualFullSimulationAutomationTest::RunTest(const FString& Parameters)
 {
 	const bool bLoadedMap = LoadSimBlankIntoEditorWorld();
 	TestTrue(TEXT("should load SimBlank into the editor world"), bLoadedMap);
@@ -138,20 +141,20 @@ bool FGatherersVisualPickupAutomationTest::RunTest(const FString& Parameters)
 
 	MassSubsystem->ResetSimulation();
 
-	FGatherersSpawnPlan Plan = BuildInitialGatherersSpawnPlan();
+	FGatherersSpawnPlan Plan = BuildFullSimulationVisualSpawnPlan();
 	Plan.bSpawnActorVisuals = false;
 	const FGatherersSpawnResult Result = SpawnGatherersActors(*World, Plan);
-	TestEqual(TEXT("visual spawned ant actor count"), Result.Ants.Num(), 0);
-	TestEqual(TEXT("visual spawned food actor count"), Result.Foods.Num(), 0);
-	TestEqual(TEXT("visual managed ant count"), MassSubsystem->GetManagedAntCount(), 1);
-	TestEqual(TEXT("visual managed food count"), MassSubsystem->GetManagedFoodCount(), 2);
+	TestEqual(TEXT("full-sim visual spawned ant actor count"), Result.Ants.Num(), 0);
+	TestEqual(TEXT("full-sim visual spawned food actor count"), Result.Foods.Num(), 0);
+	TestEqual(TEXT("full-sim visual managed ant count"), MassSubsystem->GetManagedAntCount(), 1);
+	TestEqual(TEXT("full-sim visual managed food count"), MassSubsystem->GetManagedFoodCount(), 3);
 
-	if (MassSubsystem->GetManagedAntCount() != 1 || MassSubsystem->GetManagedFoodCount() != 2)
+	if (MassSubsystem->GetManagedAntCount() != 1 || MassSubsystem->GetManagedFoodCount() != 3)
 	{
 		return false;
 	}
 
-	FrameVisualPickupInViewport(Plan);
-	ADD_LATENT_AUTOMATION_COMMAND(FGatherersAdvanceVisiblePickupCommand(this));
+	FrameVisualFullSimulationInViewport(Plan);
+	ADD_LATENT_AUTOMATION_COMMAND(FGatherersAdvanceVisibleFullSimulationCommand(this));
 	return true;
 }

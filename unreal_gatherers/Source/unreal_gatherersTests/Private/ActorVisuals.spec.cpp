@@ -1,9 +1,7 @@
-#include "Actors/Ant.h"
-#include "Actors/Food.h"
-#include "Components/StaticMeshComponent.h"
 #include "Editor.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Misc/AutomationTest.h"
+#include "Simulation/GatherersMassSubsystem.h"
 #include "Simulation/GatherersSpawnPlan.h"
 #include "Simulation/GatherersWorldSpawner.h"
 
@@ -21,7 +19,7 @@ bool ColorsMatch(const FLinearColor& Left, const FLinearColor& Right)
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FGatherersActorVisualsAutomationTest,
-	"default.unreal_gatherers.Visual.ActorsExposeRustColorVisuals",
+	"default.unreal_gatherers.Visual.MassInstancedVisualsExposeRustColorVisuals",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FGatherersActorVisualsAutomationTest::RunTest(const FString& Parameters)
@@ -34,20 +32,34 @@ bool FGatherersActorVisualsAutomationTest::RunTest(const FString& Parameters)
 		return false;
 	}
 
-	const FGatherersSpawnResult Result = SpawnGatherersActors(*World, BuildInitialGatherersSpawnPlan());
-	TestEqual(TEXT("spawned ant count"), Result.Ants.Num(), 1);
-	TestEqual(TEXT("spawned food count"), Result.Foods.Num(), 2);
+	UGatherersMassSubsystem* MassSubsystem = World->GetSubsystem<UGatherersMassSubsystem>();
+	TestNotNull(TEXT("gatherers Mass subsystem should exist"), MassSubsystem);
 
-	if (Result.Ants.Num() != 1 || Result.Foods.Num() != 2)
+	if (MassSubsystem == nullptr)
 	{
 		return false;
 	}
 
-	UStaticMeshComponent* AntVisual = Result.Ants[0]->FindComponentByClass<UStaticMeshComponent>();
-	UStaticMeshComponent* FoodVisual = Result.Foods[0]->FindComponentByClass<UStaticMeshComponent>();
+	MassSubsystem->ResetSimulation();
 
-	TestNotNull(TEXT("ant should have a visible mesh component"), AntVisual);
-	TestNotNull(TEXT("food should have a visible mesh component"), FoodVisual);
+	FGatherersSpawnPlan Plan = BuildInitialGatherersSpawnPlan();
+	Plan.bSpawnActorVisuals = false;
+	const FGatherersSpawnResult Result = SpawnGatherersActors(*World, Plan);
+	TestEqual(TEXT("spawned ant actor count"), Result.Ants.Num(), 0);
+	TestEqual(TEXT("spawned food actor count"), Result.Foods.Num(), 0);
+	TestEqual(TEXT("Mass subsystem tracks one ant entity"), MassSubsystem->GetManagedAntCount(), 1);
+	TestEqual(TEXT("Mass subsystem tracks two food entities"), MassSubsystem->GetManagedFoodCount(), 2);
+	MassSubsystem->Tick(0.1f);
+
+	if (MassSubsystem->ManagedAntEntities.Num() != 1 || MassSubsystem->ManagedFoodEntities.Num() != 2)
+	{
+		return false;
+	}
+
+	const UInstancedStaticMeshComponent* AntVisual = MassSubsystem->GetAntVisualComponent();
+	const UInstancedStaticMeshComponent* FoodVisual = MassSubsystem->GetFoodVisualComponent();
+	TestNotNull(TEXT("ant should have a visible instanced mesh component"), const_cast<UInstancedStaticMeshComponent*>(AntVisual));
+	TestNotNull(TEXT("food should have a visible instanced mesh component"), const_cast<UInstancedStaticMeshComponent*>(FoodVisual));
 
 	if (AntVisual != nullptr)
 	{
@@ -76,22 +88,6 @@ bool FGatherersActorVisualsAutomationTest::RunTest(const FString& Parameters)
 				ColorsMatch(FoodMaterial->K2_GetVectorParameterValue(ColorParameterName), ExpectedFoodColor));
 		}
 	}
-
-	for (AAnt* Ant : Result.Ants)
-	{
-		if (Ant != nullptr)
-		{
-			Ant->Destroy();
-		}
-	}
-
-	for (AFood* Food : Result.Foods)
-	{
-		if (Food != nullptr)
-		{
-			Food->Destroy();
-		}
-	}
-
+	MassSubsystem->ResetSimulation();
 	return true;
 }

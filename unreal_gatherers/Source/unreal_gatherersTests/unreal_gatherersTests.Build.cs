@@ -11,6 +11,11 @@ public class unreal_gatherersTests : ModuleRules
 			"Core",
 			"CoreUObject",
 			"Engine",
+			"MassEntity",
+			"MassCommon",
+			"MassActors",
+			"MassSimulation",
+			"MassRepresentation",
 			"UnrealEd",
 			"unreal_gatherers",
 		});

@@ -1,9 +1,12 @@
 #include "Actors/Ant.h"
 #include "Actors/Food.h"
 #include "Editor.h"
+#include "EngineUtils.h"
 #include "HAL/PlatformTime.h"
 #include "Misc/AutomationTest.h"
+#include "Simulation/GatherersMassSubsystem.h"
 #include "Simulation/GatherersSpawnPlan.h"
+#include "Simulation/GatherersWorldSpawner.h"
 #include "TestLogic/GatherersWorldAssertions.h"
 #include "Tests/AutomationCommon.h"
 #include "Tests/AutomationEditorCommon.h"
@@ -26,6 +29,64 @@ DEFINE_LATENT_AUTOMATION_COMMAND_ONE_PARAMETER(
 	FGatherersQueueSecondDropSimulationRunCommand,
 	FAutomationTestBase*,
 	Test);
+
+class FGatherersPrepareDeterministicSimulationFixtureCommand : public IAutomationLatentCommand
+{
+public:
+	explicit FGatherersPrepareDeterministicSimulationFixtureCommand(FAutomationTestBase* InTest)
+		: Test(InTest)
+	{
+	}
+
+	virtual bool Update() override
+	{
+		UWorld* World = GEditor ? GEditor->PlayWorld : nullptr;
+		Test->TestNotNull(TEXT("simulation world should exist for deterministic fixture setup"), World);
+		if (World == nullptr)
+		{
+			return true;
+		}
+
+		UGatherersMassSubsystem* MassSubsystem = World->GetSubsystem<UGatherersMassSubsystem>();
+		Test->TestNotNull(TEXT("simulation world should expose the gatherers Mass subsystem"), MassSubsystem);
+		if (MassSubsystem != nullptr)
+		{
+			MassSubsystem->ResetSimulation();
+		}
+
+		const GatherersWorldAssertions::FObservedWorldState ExistingWorldState = GatherersWorldAssertions::Observe(World);
+		for (AAnt* Ant : ExistingWorldState.Ants)
+		{
+			if (Ant != nullptr)
+			{
+				Ant->Destroy();
+			}
+		}
+
+		for (AFood* Food : ExistingWorldState.Foods)
+		{
+			if (Food != nullptr)
+			{
+				Food->Destroy();
+			}
+		}
+
+		FGatherersSpawnPlan Plan = BuildInitialGatherersSpawnPlan();
+		Plan.bSpawnActorVisuals = false;
+		const FGatherersSpawnResult SpawnResult = SpawnGatherersActors(*World, Plan);
+		Test->TestEqual(TEXT("deterministic simulation fixture ant actor count"), SpawnResult.Ants.Num(), 0);
+		Test->TestEqual(TEXT("deterministic simulation fixture food actor count"), SpawnResult.Foods.Num(), 0);
+		if (MassSubsystem != nullptr)
+		{
+			Test->TestEqual(TEXT("deterministic simulation fixture managed ant count"), MassSubsystem->GetManagedAntCount(), 1);
+			Test->TestEqual(TEXT("deterministic simulation fixture managed food count"), MassSubsystem->GetManagedFoodCount(), 2);
+		}
+		return true;
+	}
+
+private:
+	FAutomationTestBase* Test;
+};
 
 class FGatherersWaitForSimulationPIECleanupCommand : public IAutomationLatentCommand
 {
@@ -76,22 +137,19 @@ public:
 			return true;
 		}
 
-		const GatherersWorldAssertions::FObservedWorldState WorldState = GatherersWorldAssertions::Observe(World);
-		AAnt* Ant = WorldState.GetSingleAnt();
-		AFood* AttachedFood = WorldState.GetFirstAttachedFood();
-		const bool bPickedUpFood = Ant != nullptr && AttachedFood != nullptr && AttachedFood->GetAttachParentActor() == Ant
-			&& WorldState.CountAttachedFoods() == 1;
+		const GatherersWorldAssertions::FObservedMassVisualState VisualState = GatherersWorldAssertions::ObserveMassVisuals(World);
+		const bool bPickedUpFood = VisualState.HasCarriedFoodVisual(20.0f);
 
 		if (bPickedUpFood && !PickupLocation.IsSet())
 		{
-			PickupLocation = Ant->GetActorLocation();
+			PickupLocation = VisualState.AntPositions[0];
 			return false;
 		}
 
 		if (bPickedUpFood && PickupLocation.IsSet())
 		{
 			const bool bAntMovedWhileCarrying =
-				!Ant->GetActorLocation().Equals(PickupLocation.GetValue(), KINDA_SMALL_NUMBER);
+				!VisualState.AntPositions[0].Equals(PickupLocation.GetValue(), KINDA_SMALL_NUMBER);
 			if (bAntMovedWhileCarrying)
 			{
 				Test->TestTrue(TEXT("ant keeps moving after pickup while carrying food"), true);
@@ -134,22 +192,17 @@ public:
 			return true;
 		}
 
-		const FGatherersSpawnPlan Plan = BuildInitialGatherersSpawnPlan();
-		const GatherersWorldAssertions::FObservedWorldState WorldState = GatherersWorldAssertions::Observe(World);
-		const bool bHasOneAntAndTwoFoods = WorldState.Ants.Num() == 1 && WorldState.Foods.Num() == 2;
-		bool bAnyFoodAttached = false;
+		FGatherersSpawnPlan Plan = BuildInitialGatherersSpawnPlan();
+		Plan.bSpawnActorVisuals = false;
+		const GatherersWorldAssertions::FObservedMassVisualState VisualState = GatherersWorldAssertions::ObserveMassVisuals(World);
+		const bool bHasOneAntAndTwoFoods = VisualState.HasSingleAntAndTwoFoods();
+		const bool bAnyFoodAttached = VisualState.HasCarriedFoodVisual(20.0f);
 		bool bDroppedFoodLeftInitialForwardSpawn = false;
 
-		for (AFood* Food : WorldState.Foods)
+		for (const FVector& FoodPosition : VisualState.FoodPositions)
 		{
-			if (Food == nullptr)
-			{
-				continue;
-			}
-
-			bAnyFoodAttached |= Food->GetAttachParentActor() != nullptr;
 			bDroppedFoodLeftInitialForwardSpawn |=
-				!Food->GetActorLocation().Equals(Plan.FoodSpawns[0].GetLocation(), KINDA_SMALL_NUMBER);
+				!FoodPosition.Equals(Plan.FoodSpawns[0].GetLocation(), KINDA_SMALL_NUMBER);
 		}
 
 		if (bAnyFoodAttached)
@@ -181,13 +234,19 @@ private:
 
 bool FGatherersWaitForSimulationPickupCommand::Update()
 {
-	return GatherersWorldAssertions::PollForPickupState(
+	return GatherersWorldAssertions::PollForMassPickupState(
 		*Test,
 		GEditor ? GEditor->PlayWorld : nullptr,
-		BuildInitialGatherersSpawnPlan(),
+		[]()
+		{
+			FGatherersSpawnPlan Plan = BuildInitialGatherersSpawnPlan();
+			Plan.bSpawnActorVisuals = false;
+			return Plan;
+		}(),
 		StartTimeSeconds,
 		TimeoutSeconds,
-		TEXT("simulation"));
+		TEXT("simulation"),
+		20.0f);
 }
 
 bool FGatherersQueueSecondSimulationRunCommand::Update()
@@ -200,6 +259,7 @@ bool FGatherersQueueSecondSimulationRunCommand::Update()
 		return true;
 	}
 
+	ADD_LATENT_AUTOMATION_COMMAND(FGatherersPrepareDeterministicSimulationFixtureCommand(Test));
 	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForSimulationPickupCommand(Test, FPlatformTime::Seconds(), 5.0));
 	ADD_LATENT_AUTOMATION_COMMAND(FEndPlayMapCommand());
 	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForSimulationPIECleanupCommand(Test, 5.0));
@@ -216,6 +276,7 @@ bool FGatherersQueueSecondDropSimulationRunCommand::Update()
 		return true;
 	}
 
+	ADD_LATENT_AUTOMATION_COMMAND(FGatherersPrepareDeterministicSimulationFixtureCommand(Test));
 	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForDropStateCommand(Test, FPlatformTime::Seconds(), 8.0));
 	ADD_LATENT_AUTOMATION_COMMAND(FEndPlayMapCommand());
 	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForSimulationPIECleanupCommand(Test, 5.0));
@@ -237,6 +298,7 @@ bool FGatherersAntPickupActorAutomationTest::RunTest(const FString& Parameters)
 		return false;
 	}
 
+	ADD_LATENT_AUTOMATION_COMMAND(FGatherersPrepareDeterministicSimulationFixtureCommand(this));
 	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForSimulationPickupCommand(this, FPlatformTime::Seconds(), 5.0));
 	ADD_LATENT_AUTOMATION_COMMAND(FEndPlayMapCommand());
 	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForSimulationPIECleanupCommand(this, 5.0));
@@ -258,6 +320,7 @@ bool FGatherersAntPickupActorRerunAutomationTest::RunTest(const FString& Paramet
 		return false;
 	}
 
+	ADD_LATENT_AUTOMATION_COMMAND(FGatherersPrepareDeterministicSimulationFixtureCommand(this));
 	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForSimulationPickupCommand(this, FPlatformTime::Seconds(), 5.0));
 	ADD_LATENT_AUTOMATION_COMMAND(FEndPlayMapCommand());
 	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForSimulationPIECleanupCommand(this, 5.0));
@@ -280,6 +343,7 @@ bool FGatherersAntCarryMovementAutomationTest::RunTest(const FString& Parameters
 		return false;
 	}
 
+	ADD_LATENT_AUTOMATION_COMMAND(FGatherersPrepareDeterministicSimulationFixtureCommand(this));
 	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForCarryMovementCommand(this, FPlatformTime::Seconds(), 5.0));
 	ADD_LATENT_AUTOMATION_COMMAND(FEndPlayMapCommand());
 	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForSimulationPIECleanupCommand(this, 5.0));
@@ -301,6 +365,7 @@ bool FGatherersAntDropFoodAutomationTest::RunTest(const FString& Parameters)
 		return false;
 	}
 
+	ADD_LATENT_AUTOMATION_COMMAND(FGatherersPrepareDeterministicSimulationFixtureCommand(this));
 	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForDropStateCommand(this, FPlatformTime::Seconds(), 8.0));
 	ADD_LATENT_AUTOMATION_COMMAND(FEndPlayMapCommand());
 	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForSimulationPIECleanupCommand(this, 20.0));
@@ -322,6 +387,7 @@ bool FGatherersAntDropFoodRerunAutomationTest::RunTest(const FString& Parameters
 		return false;
 	}
 
+	ADD_LATENT_AUTOMATION_COMMAND(FGatherersPrepareDeterministicSimulationFixtureCommand(this));
 	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForDropStateCommand(this, FPlatformTime::Seconds(), 8.0));
 	ADD_LATENT_AUTOMATION_COMMAND(FEndPlayMapCommand());
 	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForSimulationPIECleanupCommand(this, 5.0));

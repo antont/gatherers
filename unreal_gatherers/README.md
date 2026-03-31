@@ -7,11 +7,13 @@ Unreal 5.7 port of the `gatherers` simulation.
 Current implemented slice:
 
 - editor-only automation test module
-- deterministic spawn plan with one ant and two foods
-- `AAnt`/`AFood` repeated gather loop
+- random full-simulation game startup path with Rust-like ant row spacing and food count, backed by Mass-managed sim state and dedicated subsystem-owned instanced-mesh visuals
+- preserved deterministic gather-demo path with one ant and two foods for explicit test/manual fixtures, now rendered through the Mass visual path by default
+- optional actor-spawn fixture coverage for focused comparison/regression tests that explicitly opt in to actor visuals
+- Mass-backed full-simulation runtime with heading-based movement, pickup/drop, cooldown, repeated gathering, and border turn-back
 - startup integration through `Aunreal_gatherersGameModeBase`
 - standalone `-game` launch into `SimBlank`
-- visual/manual editor inspection path
+- separate visual/manual editor inspection paths for the deterministic demo and the new full simulation
 
 Still out of scope:
 
@@ -51,22 +53,33 @@ Useful targeted reruns:
 ```sh
 -ExecCmds="Automation RunTest default.unreal_gatherers.Placeholder.LoadsTestModule;Quit"
 -ExecCmds="Automation RunTest default.unreal_gatherers.Spawning.SpawnPlanDefinesOneAntAndTwoFoods;Quit"
+-ExecCmds="Automation RunTest default.unreal_gatherers.Spawning.MassDefaultSpawnerSkipsAntAndFoodActors;Quit"
 -ExecCmds="Automation RunTest default.unreal_gatherers.Spawning.WorldSpawnerCreatesAntAndTwoFoodActors;Quit"
 -ExecCmds="Automation RunTest default.unreal_gatherers.Simulation.AntMovesAndPicksUpFoodInWorld;Quit"
 -ExecCmds="Automation RunTest default.unreal_gatherers.Simulation.AntDropsFoodBackIntoWorld;Quit"
 -ExecCmds="Automation RunTest default.unreal_gatherers.Simulation.AntDropsFoodTwiceInSameEditorSession;Quit"
--ExecCmds="Automation RunTest supplemental.unreal_gatherers.Spawning.StartupSmokeSpawnsOneAntAndTwoFoods;Quit"
+-ExecCmds="Automation RunTest default.unreal_gatherers.FullSimulation;Quit"
+-ExecCmds="Automation RunTest default.unreal_gatherers.FullSimulationActorFixture;Quit"
+-ExecCmds="Automation RunTest default.unreal_gatherers.Mass;Quit"
+-ExecCmds="Automation RunTest supplemental.unreal_gatherers.Spawning.StartupSmokeSpawnsRustLikeFullSimulationCounts;Quit"
+-ExecCmds="Automation RunTest supplemental.unreal_gatherers.Mass.MassVisualsStayStableAcrossLiveFrames;Quit"
 ```
 
-## Run the visual gather demo
+## Run the visual gather demos
 
 The visual/manual pickup path is intentionally separate from `./scripts/test_unreal.sh` so the default automation suite stays clean and rerunnable.
 
-Run this scenario from the editor automation UI under:
+Deterministic gather-demo path:
 
 `manual.unreal_gatherers.Visual.AntFirstDropLeavesWorldForInspection`
 
-That visual/manual test loads `SimBlank` into a clean editor world, frames the viewport around the two-food layout, advances the ant through pickup and return, and leaves the first dropped-food state behind for inspection.
+That visual/manual test loads `SimBlank` into a clean editor world, frames the viewport around the two-food layout, advances the Mass sim through pickup and return, and leaves the first dropped-food state behind for inspection with instanced ant/food visuals.
+
+Full-simulation path:
+
+`manual.unreal_gatherers.Visual.FullSimulationSecondPickupStaysVisible`
+
+That visual/manual test also loads `SimBlank` into a clean editor world, but it uses the separate full-simulation spawn harness and runtime path. It shows a heading-driven ant pick up food, drop it, cool down, and reach a second pickup state for inspection through the Mass instanced-mesh visuals.
 
 ## Refresh editor indexing
 
@@ -93,4 +106,12 @@ The current startup path should load:
 - `/Game/SimBlank/Levels/SimBlank`
 - `unreal_gatherersGameModeBase`
 
-and spawn one ant actor plus two food actors.
+and spawn the random full-simulation path by default:
+
+- 80 food instances at random positions
+- a Rust-like row of ant instances spaced 50 units apart across the play area
+- random initial headings for those ants
+- Mass-managed ant/food simulation state rendered through dedicated ant/food instanced mesh components owned by the gatherers Mass subsystem
+- no per-entity `AAnt`/`AFood` runtime actor spawning on the default path
+
+The old one-ant/two-food deterministic setup is still preserved, and explicit actor-spawn fixtures are still available for targeted regression coverage, but the live full-simulation runtime now means the actor-free Mass-backed path.

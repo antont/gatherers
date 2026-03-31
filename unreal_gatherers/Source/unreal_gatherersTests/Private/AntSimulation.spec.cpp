@@ -3,24 +3,6 @@
 #include "Simulation/GatherersAntSimulation.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FGatherersAntMovementStepAutomationTest,
-	"default.unreal_gatherers.Simulation.AntMovementStepMovesTowardFood",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
-
-bool FGatherersAntMovementStepAutomationTest::RunTest(const FString& Parameters)
-{
-	const FVector CurrentLocation(-50.0f, 0.0f, 0.0f);
-	const FVector FoodLocation(50.0f, 0.0f, 0.0f);
-
-	const FVector NextLocation = ComputeAntNextLocation(CurrentLocation, FoodLocation, 100.0f, 0.1f);
-
-	TestTrue(
-		TEXT("ant moves ten units toward food in one step"),
-		NextLocation.Equals(FVector(-40.0f, 0.0f, 0.0f), KINDA_SMALL_NUMBER));
-	return true;
-}
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FGatherersAntPickupRadiusAutomationTest,
 	"default.unreal_gatherers.Simulation.AntPickupTriggersWithinRadius",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
@@ -53,24 +35,6 @@ bool FGatherersAntRetargetDirectionAutomationTest::RunTest(const FString& Parame
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FGatherersClosestLooseFoodAutomationTest,
-	"default.unreal_gatherers.Simulation.AntTargetsNearestLooseFood",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
-
-bool FGatherersClosestLooseFoodAutomationTest::RunTest(const FString& Parameters)
-{
-	TArray<FGatherersFoodTarget> FoodTargets;
-	FoodTargets.Add({FVector(400.0f, 0.0f, 0.0f), true});
-	FoodTargets.Add({FVector(100.0f, 0.0f, 0.0f), false});
-	FoodTargets.Add({FVector(200.0f, 0.0f, 0.0f), true});
-
-	const int32 ClosestLooseFoodIndex = FindClosestLooseFoodTargetIndex(FVector::ZeroVector, FoodTargets);
-
-	TestEqual(TEXT("ant picks the nearest loose food and ignores carried food"), ClosestLooseFoodIndex, 2);
-	return true;
-}
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FGatherersPickupCooldownAutomationTest,
 	"default.unreal_gatherers.Simulation.AntPickupCooldownCountsDownAndClampsToZero",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
@@ -95,5 +59,73 @@ bool FGatherersCarriedFoodOffsetAutomationTest::RunTest(const FString& Parameter
 	TestTrue(
 		TEXT("carried food sits directly above the ant at the configured height"),
 		CarriedFoodOffset.Equals(FVector(0.0f, 0.0f, 20.0f), KINDA_SMALL_NUMBER));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FGatherersHeadingMovementStepAutomationTest,
+	"default.unreal_gatherers.Simulation.FullSimHeadingMovementUsesSafeStepCap",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FGatherersHeadingMovementStepAutomationTest::RunTest(const FString& Parameters)
+{
+	const FVector CurrentLocation(0.0f, 0.0f, 0.0f);
+	const FVector HeadingDirection(1.0f, 0.0f, 0.0f);
+
+	const FVector NextLocation = ComputeAntHeadingMovementStep(CurrentLocation, HeadingDirection, 1000.0f, 18.0f, 0.1f);
+
+	TestTrue(
+		TEXT("full-sim movement clamps to the safe step distance instead of tunneling past it"),
+		NextLocation.Equals(FVector(18.0f, 0.0f, 0.0f), KINDA_SMALL_NUMBER));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FGatherersFullSimTurnDirectionAutomationTest,
+	"default.unreal_gatherers.Simulation.FullSimTurnDirectionUsesAboutFacePlusBoundedJitter",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FGatherersFullSimTurnDirectionAutomationTest::RunTest(const FString& Parameters)
+{
+	const FVector CurrentDirection(1.0f, 0.0f, 0.0f);
+	const FVector TurnedDirection = ComputeAntTurnDirection(CurrentDirection, 1.0f, PI / 2.0f);
+
+	TestTrue(
+		TEXT("full-sim pickup/drop turn can rotate up to the positive jitter bound around an about-face turn"),
+		TurnedDirection.Equals(FVector(0.0f, -1.0f, 0.0f), KINDA_SMALL_NUMBER));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FGatherersPickupSeparationCooldownAutomationTest,
+	"default.unreal_gatherers.Simulation.FullSimPickupCooldownPreservesDropSeparationDistance",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FGatherersPickupSeparationCooldownAutomationTest::RunTest(const FString& Parameters)
+{
+	const float CooldownSeconds = ComputePickupCooldownForSeparationDistance(50.0f, 100.0f);
+
+	TestEqual(
+		TEXT("full-sim cooldown can be derived from the desired separation distance and movement speed"),
+		CooldownSeconds,
+		0.5f);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FGatherersBoundaryTurnBackAutomationTest,
+	"default.unreal_gatherers.Simulation.FullSimBoundaryTurnBackReflectsHeadingInward",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FGatherersBoundaryTurnBackAutomationTest::RunTest(const FString& Parameters)
+{
+	const FVector CurrentDirection(1.0f, 0.0f, 0.0f);
+	const FVector InwardBoundaryNormal(-1.0f, 0.0f, 0.0f);
+
+	const FVector TurnedDirection = ComputeBoundaryTurnBackDirection(CurrentDirection, InwardBoundaryNormal);
+
+	TestTrue(
+		TEXT("boundary turn-back reflects the heading back into the play area"),
+		TurnedDirection.Equals(FVector(-1.0f, 0.0f, 0.0f), KINDA_SMALL_NUMBER));
 	return true;
 }

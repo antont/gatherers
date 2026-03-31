@@ -3,8 +3,10 @@
 #include "Editor.h"
 #include "EngineUtils.h"
 #include "Misc/AutomationTest.h"
+#include "Simulation/GatherersMassSubsystem.h"
 #include "Simulation/GatherersSpawnPlan.h"
 #include "Simulation/GatherersWorldSpawner.h"
+#include "TestLogic/GatherersWorldAssertions.h"
 
 namespace
 {
@@ -26,6 +28,11 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	"default.unreal_gatherers.Spawning.WorldSpawnerCreatesAntAndTwoFoodActors",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FGatherersMassWorldSpawnerAutomationTest,
+	"default.unreal_gatherers.Spawning.MassDefaultSpawnerSkipsAntAndFoodActors",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
 bool FGatherersWorldSpawnerAutomationTest::RunTest(const FString& Parameters)
 {
 	constexpr float PositionTolerance = KINDA_SMALL_NUMBER;
@@ -37,7 +44,8 @@ bool FGatherersWorldSpawnerAutomationTest::RunTest(const FString& Parameters)
 		return false;
 	}
 
-	const FGatherersSpawnPlan Plan = BuildInitialGatherersSpawnPlan();
+	FGatherersSpawnPlan Plan = BuildInitialGatherersSpawnPlan();
+	Plan.bSpawnActorVisuals = true;
 	AAnt* ExistingAnt = World->SpawnActor<AAnt>(AAnt::StaticClass(), FTransform(FVector(-100.0f, 0.0f, 50.0f)));
 	AFood* ExistingFood = World->SpawnActor<AFood>(AFood::StaticClass(), FTransform(FVector(-200.0f, 0.0f, 50.0f)));
 	TestNotNull(TEXT("preexisting ant should spawn"), ExistingAnt);
@@ -99,5 +107,46 @@ bool FGatherersWorldSpawnerAutomationTest::RunTest(const FString& Parameters)
 		}
 	}
 
+	return true;
+}
+
+bool FGatherersMassWorldSpawnerAutomationTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	TestNotNull(TEXT("editor world should exist"), World);
+
+	if (World == nullptr)
+	{
+		return false;
+	}
+
+	UGatherersMassSubsystem* MassSubsystem = World->GetSubsystem<UGatherersMassSubsystem>();
+	TestNotNull(TEXT("gatherers Mass subsystem should exist"), MassSubsystem);
+
+	if (MassSubsystem == nullptr)
+	{
+		return false;
+	}
+
+	MassSubsystem->ResetSimulation();
+	const FGatherersSpawnPlan Plan = BuildInitialGatherersSpawnPlan();
+	const TArray<AAnt*> AntsBeforeSpawn = CollectActors<AAnt>(World);
+	const TArray<AFood*> FoodsBeforeSpawn = CollectActors<AFood>(World);
+	const FGatherersSpawnResult Result = SpawnGatherersActors(*World, Plan);
+	MassSubsystem->Tick(0.1f);
+	const TArray<AAnt*> AntsInWorld = CollectActors<AAnt>(World);
+	const TArray<AFood*> FoodsInWorld = CollectActors<AFood>(World);
+	const GatherersWorldAssertions::FObservedMassVisualState VisualState = GatherersWorldAssertions::ObserveMassVisuals(World);
+
+	TestEqual(TEXT("default Mass-backed spawn plan does not return ant actors"), Result.Ants.Num(), 0);
+	TestEqual(TEXT("default Mass-backed spawn plan does not return food actors"), Result.Foods.Num(), 0);
+	TestEqual(TEXT("default Mass-backed spawn plan does not add ant actors to the world"), AntsInWorld.Num(), AntsBeforeSpawn.Num());
+	TestEqual(TEXT("default Mass-backed spawn plan does not add food actors to the world"), FoodsInWorld.Num(), FoodsBeforeSpawn.Num());
+	TestEqual(TEXT("default Mass-backed spawn plan still manages one ant entity"), MassSubsystem->GetManagedAntCount(), 1);
+	TestEqual(TEXT("default Mass-backed spawn plan still manages two food entities"), MassSubsystem->GetManagedFoodCount(), 2);
+	TestEqual(TEXT("default Mass-backed spawn plan still renders one ant instance"), VisualState.AntVisualPositions.Num(), 1);
+	TestEqual(TEXT("default Mass-backed spawn plan still renders two food instances"), VisualState.FoodVisualPositions.Num(), 2);
+
+	MassSubsystem->ResetSimulation();
 	return true;
 }
