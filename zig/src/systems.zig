@@ -324,6 +324,30 @@ test "movement system does nothing with zero delta" {
     try std.testing.expectEqual(@as(f32, 200.0), pos.y);
 }
 
+test "movement system updates carried food position to match ant" {
+    const world = createTestWorld();
+    defer _ = ecs.fini(world);
+
+    const ant = spawnTestAnt(world, 0.0, 0.0, 1.0, 0.0);
+    const food = spawnTestFood(world, 99.0, 99.0); // food starts elsewhere
+
+    // Set up carrying relationship
+    _ = ecs.set(world, ant, Carrying, .{ .food = food });
+    _ = ecs.set(world, food, CarriedBy, .{ .ant = ant });
+    ecs.remove(world, food, components.Collidable);
+
+    const settings = config.SimulationSettings{ .speed_multiplier = 1.0 };
+    const delta: f32 = 1.0 / 60.0;
+
+    movementSystem(world, &settings, delta);
+
+    // Carried food should now be at the ant's new position
+    const ant_pos = ecs.get(world, ant, Position).?;
+    const food_pos = ecs.get(world, food, Position).?;
+    try std.testing.expectApproxEqAbs(ant_pos.x, food_pos.x, 0.01);
+    try std.testing.expectApproxEqAbs(ant_pos.y, food_pos.y, 0.01);
+}
+
 // =============================================================================
 // Boundary Wrap System Tests
 // =============================================================================

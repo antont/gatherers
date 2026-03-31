@@ -79,7 +79,15 @@ const testing = std.testing;
 test "spawn layout generates correct ant count for 1280 wide map" {
     const layout = generateSpawnLayout(1280.0, 720.0, 42);
     try testing.expect(layout.ants().len > 0);
-    try testing.expectEqual(@as(usize, 25), layout.ants().len);
+    // Rust: (-640..640).step_by(50) = -640,-590,...,590,610 → 26 ants
+    try testing.expectEqual(@as(usize, 26), layout.ants().len);
+}
+
+test "ant x positions match Rust half-open range" {
+    const layout = generateSpawnLayout(1280.0, 720.0, 42);
+    // First ant at -640, last at 610 (half-open: -half_x..half_x step 50)
+    try testing.expectEqual(@as(f32, -640.0), layout.ants()[0].x);
+    try testing.expectEqual(@as(f32, 610.0), layout.ants()[layout.ant_count - 1].x);
 }
 
 test "all ants spawn at y=100" {
@@ -94,11 +102,12 @@ test "spawn layout generates 80 food items" {
     try testing.expectEqual(@as(usize, 80), layout.food().len);
 }
 
-test "food positions are within map bounds" {
+test "food positions are within map bounds (exclusive upper)" {
     const layout = generateSpawnLayout(1280.0, 720.0, 42);
     for (layout.food()) |pos| {
-        try testing.expect(pos.x >= -640.0 and pos.x <= 640.0);
-        try testing.expect(pos.y >= -360.0 and pos.y <= 360.0);
+        // Rust uses random_range(-half..half) which is exclusive of upper bound
+        try testing.expect(pos.x >= -640.0 and pos.x < 640.0);
+        try testing.expect(pos.y >= -360.0 and pos.y < 360.0);
     }
 }
 
