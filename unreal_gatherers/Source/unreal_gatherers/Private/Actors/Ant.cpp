@@ -63,12 +63,44 @@ void AAnt::Tick(float DeltaSeconds)
 
 	if (bUseFullSimulationMode)
 	{
-		const FVector NextLocation = ComputeAntHeadingMovementStep(
+		FVector NextLocation = ComputeAntHeadingMovementStep(
 			CurrentLocation,
 			MovementDirection,
 			AntMovementSpeed,
 			AntSafeStepDistance,
 			DeltaSeconds);
+
+		if (FullSimulationBounds.IsValid)
+		{
+			FVector InwardBoundaryNormal = FVector::ZeroVector;
+			if (NextLocation.X < FullSimulationBounds.Min.X)
+			{
+				NextLocation.X = FullSimulationBounds.Min.X;
+				InwardBoundaryNormal += FVector(1.0f, 0.0f, 0.0f);
+			}
+			else if (NextLocation.X > FullSimulationBounds.Max.X)
+			{
+				NextLocation.X = FullSimulationBounds.Max.X;
+				InwardBoundaryNormal += FVector(-1.0f, 0.0f, 0.0f);
+			}
+
+			if (NextLocation.Y < FullSimulationBounds.Min.Y)
+			{
+				NextLocation.Y = FullSimulationBounds.Min.Y;
+				InwardBoundaryNormal += FVector(0.0f, 1.0f, 0.0f);
+			}
+			else if (NextLocation.Y > FullSimulationBounds.Max.Y)
+			{
+				NextLocation.Y = FullSimulationBounds.Max.Y;
+				InwardBoundaryNormal += FVector(0.0f, -1.0f, 0.0f);
+			}
+
+			if (!InwardBoundaryNormal.IsNearlyZero())
+			{
+				MovementDirection = ComputeBoundaryTurnBackDirection(MovementDirection, InwardBoundaryNormal);
+			}
+		}
+
 		SetActorLocation(NextLocation);
 
 		if (PickupCooldownRemainingSeconds > 0.0f)
