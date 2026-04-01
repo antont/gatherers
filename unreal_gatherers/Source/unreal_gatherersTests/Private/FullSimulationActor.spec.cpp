@@ -5,6 +5,7 @@
 #include "Simulation/GatherersMassSubsystem.h"
 #include "Simulation/GatherersSpawnPlan.h"
 #include "Simulation/GatherersWorldSpawner.h"
+#include "unreal_gatherers/unreal_gatherersGameModeBase.h"
 
 namespace
 {
@@ -145,6 +146,11 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	"default.unreal_gatherers.FullSimulationActorFixture.HighSpeedMovementPicksUpFoodAlongSweptPath",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FGatherersFullSimulationFastWorldTimeSweptPickupAutomationTest,
+	"default.unreal_gatherers.FullSimulationActorFixture.FastWorldTimeStillPicksUpFoodAlongSweptPath",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
 bool FGatherersFullSimulationHighSpeedPickupAutomationTest::RunTest(const FString& Parameters)
 {
 	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
@@ -241,5 +247,65 @@ bool FGatherersFullSimulationHighSpeedSweptPickupAutomationTest::RunTest(const F
 		AntFragment.CarriedFoodEntity == MassSubsystem->ManagedFoodEntities[0] && !FoodFragment.bIsLoose);
 
 	MassSubsystem->ResetSimulation();
+	return true;
+}
+
+bool FGatherersFullSimulationFastWorldTimeSweptPickupAutomationTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	UGatherersMassSubsystem* MassSubsystem = RequireMassSubsystem(*this, World);
+	if (MassSubsystem == nullptr)
+	{
+		return false;
+	}
+
+	Aunreal_gatherersGameModeBase* GameMode = World->GetAuthGameMode<Aunreal_gatherersGameModeBase>();
+	TestNotNull(TEXT("time-scaled full-sim game mode should exist"), GameMode);
+	if (GameMode == nullptr)
+	{
+		return false;
+	}
+
+	GameMode->ApplyTimeControlMode(EGatherersTimeControlMode::Fast);
+
+	FGatherersSpawnPlan Plan;
+	Plan.bUseFullSimulationMode = true;
+	Plan.bSpawnActorVisuals = false;
+	Plan.PlayAreaBounds = FBox(FVector(-500.0f, -500.0f, -100.0f), FVector(500.0f, 500.0f, 100.0f));
+	Plan.AntSpawns.Add(FTransform(FVector::ZeroVector));
+	Plan.AntInitialDirections.Add(FVector(1.0f, 0.0f, 0.0f));
+	Plan.FoodSpawns.Add(FTransform(FVector(0.0f, 14.0f, 0.0f)));
+	Plan.FullSimulationMovementSpeed = 5000.0f;
+	Plan.FullSimulationTurnJitterRadians = 0.0f;
+
+	SpawnGatherersActors(*World, Plan);
+	if (MassSubsystem->GetManagedAntCount() != 1 || MassSubsystem->GetManagedFoodCount() != 1)
+	{
+		return false;
+	}
+
+	const float RealSeconds = 0.25f;
+	const float SimulatedSeconds = RealSeconds
+		* Aunreal_gatherersGameModeBase::GetTimeDilationForMode(GameMode->GetTimeControlMode());
+	MassSubsystem->Tick(SimulatedSeconds);
+
+	UMassEntitySubsystem* MassEntitySubsystem = World->GetSubsystem<UMassEntitySubsystem>();
+	TestNotNull(TEXT("Mass entity subsystem should exist"), MassEntitySubsystem);
+	if (MassEntitySubsystem == nullptr)
+	{
+		return false;
+	}
+
+	FMassEntityManager& EntityManager = MassEntitySubsystem->GetMutableEntityManager();
+	FMassEntityView AntView(EntityManager, MassSubsystem->ManagedAntEntities[0]);
+	FMassEntityView FoodView(EntityManager, MassSubsystem->ManagedFoodEntities[0]);
+	const FGatherersMassAntFragment& AntFragment = AntView.GetFragmentData<FGatherersMassAntFragment>();
+	const FGatherersMassFoodFragment& FoodFragment = FoodView.GetFragmentData<FGatherersMassFoodFragment>();
+	TestTrue(
+		TEXT("fast world time should keep swept-path pickup behavior correct for long simulated movement"),
+		AntFragment.CarriedFoodEntity == MassSubsystem->ManagedFoodEntities[0] && !FoodFragment.bIsLoose);
+
+	MassSubsystem->ResetSimulation();
+	GameMode->ApplyTimeControlMode(EGatherersTimeControlMode::Normal);
 	return true;
 }
