@@ -9,7 +9,17 @@ void AGatherersPlayerController::BeginPlay()
 
 	if (TimeControlWidget == nullptr && IsLocalController())
 	{
-		TimeControlWidget = CreateWidget<UGatherersTimeControlWidget>(this, UGatherersTimeControlWidget::StaticClass());
+		static TSubclassOf<UGatherersTimeControlWidget> WidgetClass;
+		if (!WidgetClass)
+		{
+			WidgetClass = LoadClass<UGatherersTimeControlWidget>(nullptr,
+				TEXT("/Game/SimBlank/Blueprints/WBP_TimeControl.WBP_TimeControl_C"));
+		}
+		if (!WidgetClass)
+		{
+			WidgetClass = UGatherersTimeControlWidget::StaticClass();
+		}
+		TimeControlWidget = CreateWidget<UGatherersTimeControlWidget>(this, WidgetClass);
 		if (TimeControlWidget != nullptr)
 		{
 			if (Aunreal_gatherersGameModeBase* GatherersGameMode = GetWorld() ? GetWorld()->GetAuthGameMode<Aunreal_gatherersGameModeBase>() : nullptr)
@@ -18,7 +28,7 @@ void AGatherersPlayerController::BeginPlay()
 				GatherersGameMode->SetTimeControlWidget(TimeControlWidget);
 			}
 
-			TimeControlWidget->AddToViewport();
+			TimeControlWidget->AddSlateToViewport();
 		}
 	}
 }

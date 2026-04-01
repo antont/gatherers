@@ -1,10 +1,11 @@
 #include "UI/GatherersTimeControlWidget.h"
 
-#include "Components/Button.h"
-#include "Components/CanvasPanel.h"
-#include "Components/CanvasPanelSlot.h"
-#include "Components/TextBlock.h"
-#include "Blueprint/WidgetTree.h"
+#include "Engine/GameViewportClient.h"
+#include "Widgets/SBoxPanel.h"
+#include "Widgets/SWeakWidget.h"
+#include "Widgets/Input/SButton.h"
+#include "Widgets/Layout/SBox.h"
+#include "Widgets/Text/STextBlock.h"
 
 namespace
 {
@@ -33,7 +34,7 @@ void UGatherersTimeControlWidget::InitializeForGameMode(Aunreal_gatherersGameMod
 
 FString UGatherersTimeControlWidget::GetCurrentModeLabel() const
 {
-	return ModeLabelText ? ModeLabelText->GetText().ToString() : FString();
+	return CurrentLabel;
 }
 
 void UGatherersTimeControlWidget::TriggerToggleFromUI()
@@ -46,68 +47,89 @@ void UGatherersTimeControlWidget::TriggerToggleFromUI()
 	RefreshLabel();
 }
 
+void UGatherersTimeControlWidget::AddSlateToViewport()
+{
+	UWorld* World = GetWorld();
+	if (World == nullptr)
+	{
+		return;
+	}
+
+	UGameViewportClient* ViewportClient = World->GetGameViewport();
+	if (ViewportClient == nullptr)
+	{
+		return;
+	}
+
+	SlateRoot = SNew(SBox)
+		.Padding(FMargin(16.0f, 16.0f, 0.0f, 0.0f))
+		.HAlign(HAlign_Left)
+		.VAlign(VAlign_Top)
+		[
+			SNew(SButton)
+			.OnClicked_Lambda([this]()
+			{
+				TriggerToggleFromUI();
+				return FReply::Handled();
+			})
+			[
+				SAssignNew(SlateLabel, STextBlock)
+				.Text(FText::FromString(CurrentLabel.IsEmpty() ? TEXT("Normal") : CurrentLabel))
+				.Font(FCoreStyle::GetDefaultFontStyle("Regular", 16))
+				.ColorAndOpacity(FSlateColor(FLinearColor::Black))
+			]
+		];
+
+	ViewportClient->AddViewportWidgetContent(
+		SNew(SWeakWidget).PossiblyNullContent(SlateRoot),
+		10);
+
+}
+
+void UGatherersTimeControlWidget::RemoveSlateFromViewport()
+{
+	if (!SlateRoot.IsValid())
+	{
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (World == nullptr)
+	{
+		return;
+	}
+
+	UGameViewportClient* ViewportClient = World->GetGameViewport();
+	if (ViewportClient != nullptr)
+	{
+		ViewportClient->RemoveViewportWidgetContent(SlateRoot.ToSharedRef());
+	}
+
+	SlateRoot.Reset();
+	SlateLabel.Reset();
+}
+
 void UGatherersTimeControlWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
-
-	BuildWidgetTreeIfNeeded();
-	if (ToggleButton != nullptr && !ToggleButton->OnClicked.IsAlreadyBound(this, &UGatherersTimeControlWidget::TriggerToggleFromUI))
-	{
-		ToggleButton->OnClicked.AddDynamic(this, &UGatherersTimeControlWidget::TriggerToggleFromUI);
-	}
-
 	RefreshLabel();
 }
 
-void UGatherersTimeControlWidget::BuildWidgetTreeIfNeeded()
+void UGatherersTimeControlWidget::BeginDestroy()
 {
-	if (WidgetTree == nullptr)
-	{
-		return;
-	}
-
-	if (ToggleButton != nullptr && ModeLabelText != nullptr)
-	{
-		return;
-	}
-
-	UCanvasPanel* RootPanel = Cast<UCanvasPanel>(WidgetTree->RootWidget);
-	if (RootPanel == nullptr)
-	{
-		RootPanel = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("RootPanel"));
-		WidgetTree->RootWidget = RootPanel;
-	}
-
-	if (ToggleButton == nullptr)
-	{
-		ToggleButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("TimeToggleButton"));
-		UCanvasPanelSlot* ButtonSlot = RootPanel->AddChildToCanvas(ToggleButton);
-		if (ButtonSlot != nullptr)
-		{
-			ButtonSlot->SetAutoSize(true);
-			ButtonSlot->SetPosition(FVector2D(16.0f, 16.0f));
-		}
-	}
-
-	if (ModeLabelText == nullptr)
-	{
-		ModeLabelText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("TimeModeLabel"));
-		if (ToggleButton != nullptr)
-		{
-			ToggleButton->AddChild(ModeLabelText);
-		}
-	}
+	RemoveSlateFromViewport();
+	Super::BeginDestroy();
 }
 
 void UGatherersTimeControlWidget::RefreshLabel()
 {
-	if (ModeLabelText == nullptr)
-	{
-		return;
-	}
-
 	const EGatherersTimeControlMode Mode = GameMode.IsValid()
 		? GameMode->GetTimeControlMode()
 		: EGatherersTimeControlMode::Normal;
-	ModeLabelText->SetText(FText::FromString(BuildModeLabel(Mode)));
+	CurrentLabel = BuildModeLabel(Mode);
+
+	if (SlateLabel.IsValid())
+	{
+		SlateLabel->SetText(FText::FromString(CurrentLabel));
+	}
 }

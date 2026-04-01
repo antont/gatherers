@@ -4,8 +4,8 @@
 #include "unreal_gatherers/unreal_gatherersGameModeBase.h"
 #include "GatherersTimeControlWidget.generated.h"
 
-class UButton;
-class UTextBlock;
+class SButton;
+class STextBlock;
 
 UCLASS()
 class UNREAL_GATHERERS_API UGatherersTimeControlWidget : public UUserWidget
@@ -19,18 +19,19 @@ public:
 	UFUNCTION()
 	void TriggerToggleFromUI();
 
+	/** Add Slate overlay directly to game viewport — call instead of AddToViewport. */
+	void AddSlateToViewport();
+	void RemoveSlateFromViewport();
+
 protected:
 	virtual void NativeConstruct() override;
+	virtual void BeginDestroy() override;
 
 private:
-	void BuildWidgetTreeIfNeeded();
 	void RefreshLabel();
 
 	TWeakObjectPtr<Aunreal_gatherersGameModeBase> GameMode = nullptr;
-
-	UPROPERTY(Transient)
-	TObjectPtr<UButton> ToggleButton = nullptr;
-
-	UPROPERTY(Transient)
-	TObjectPtr<UTextBlock> ModeLabelText = nullptr;
+	TSharedPtr<STextBlock> SlateLabel;
+	TSharedPtr<SWidget> SlateRoot;
+	FString CurrentLabel;
 };
