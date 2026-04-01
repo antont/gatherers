@@ -71,7 +71,7 @@ public:
 	bool HasManagedSimulation() const;
 	const FBox& GetSimulationBounds() const;
 	const UInstancedStaticMeshComponent* GetAntVisualComponent() const;
-	const UInstancedStaticMeshComponent* GetFoodVisualComponent() const;
+	const UInstancedStaticMeshComponent* GetFoodRepresentationComponent() const;
 
 private:
 	bool EnsureVisualComponents();
@@ -92,7 +92,7 @@ private:
 	TObjectPtr<UInstancedStaticMeshComponent> AntVisualComponent = nullptr;
 
 	UPROPERTY(Transient)
-	TObjectPtr<UInstancedStaticMeshComponent> FoodVisualComponent = nullptr;
+	TObjectPtr<UInstancedStaticMeshComponent> FoodRepresentationComponent = nullptr;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UStaticMesh> VisualSphereMesh = nullptr;

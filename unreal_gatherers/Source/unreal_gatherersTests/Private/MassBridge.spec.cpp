@@ -23,6 +23,11 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	"default.unreal_gatherers.Mass.EntitiesAdvanceWithoutActorVisualProxies",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FGatherersFoodQueryChannelAutomationTest,
+	"default.unreal_gatherers.Mass.FoodRepresentationUsesDedicatedFoodQueryChannel",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
 bool FGatherersMassBridgeAutomationTest::RunTest(const FString& Parameters)
 {
 	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
@@ -187,7 +192,7 @@ bool FGatherersMassRepresentationBridgeAutomationTest::RunTest(const FString& Pa
 		const_cast<UInstancedStaticMeshComponent*>(MassSubsystem->GetAntVisualComponent()));
 	TestNotNull(
 		TEXT("Mass food path should expose a dedicated food instanced visual component"),
-		const_cast<UInstancedStaticMeshComponent*>(MassSubsystem->GetFoodVisualComponent()));
+		const_cast<UInstancedStaticMeshComponent*>(MassSubsystem->GetFoodRepresentationComponent()));
 
 	MassSubsystem->Tick(0.1f);
 
@@ -195,6 +200,62 @@ bool FGatherersMassRepresentationBridgeAutomationTest::RunTest(const FString& Pa
 	TestTrue(
 		TEXT("Mass ant can still advance without spawned actor proxies"),
 		AntFragment.Position.Equals(FVector(10.0f, 0.0f, 0.0f), 1.0f));
+
+	MassSubsystem->ResetSimulation();
+	return true;
+}
+
+bool FGatherersFoodQueryChannelAutomationTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	TestNotNull(TEXT("editor world should exist"), World);
+
+	if (World == nullptr)
+	{
+		return false;
+	}
+
+	UGatherersMassSubsystem* MassSubsystem = World->GetSubsystem<UGatherersMassSubsystem>();
+	TestNotNull(TEXT("gatherers Mass subsystem should exist"), MassSubsystem);
+	if (MassSubsystem == nullptr)
+	{
+		return false;
+	}
+
+	MassSubsystem->ResetSimulation();
+
+	FGatherersSpawnPlan Plan;
+	Plan.bUseFullSimulationMode = true;
+	Plan.bSpawnActorVisuals = false;
+	Plan.PlayAreaBounds = FBox(FVector(-500.0f, -500.0f, -100.0f), FVector(500.0f, 500.0f, 100.0f));
+	Plan.AntSpawns.Add(FTransform(FVector::ZeroVector));
+	Plan.AntInitialDirections.Add(FVector(1.0f, 0.0f, 0.0f));
+	Plan.FoodSpawns.Add(FTransform(FVector(100.0f, 0.0f, 0.0f)));
+
+	SpawnGatherersActors(*World, Plan);
+
+	const UInstancedStaticMeshComponent* FoodRepresentation = MassSubsystem->GetFoodRepresentationComponent();
+	TestNotNull(
+		TEXT("food representation component should exist"),
+		const_cast<UInstancedStaticMeshComponent*>(FoodRepresentation));
+
+	if (FoodRepresentation == nullptr)
+	{
+		return false;
+	}
+
+	TestEqual(
+		TEXT("food representation should be query-only"),
+		FoodRepresentation->GetCollisionEnabled(),
+		ECollisionEnabled::QueryOnly);
+	TestEqual(
+		TEXT("food representation should block the dedicated FoodQuery trace channel"),
+		FoodRepresentation->GetCollisionResponseToChannel(ECC_GameTraceChannel1),
+		ECR_Block);
+	TestEqual(
+		TEXT("food representation should ignore Visibility now that pickup uses FoodQuery"),
+		FoodRepresentation->GetCollisionResponseToChannel(ECC_Visibility),
+		ECR_Ignore);
 
 	MassSubsystem->ResetSimulation();
 	return true;

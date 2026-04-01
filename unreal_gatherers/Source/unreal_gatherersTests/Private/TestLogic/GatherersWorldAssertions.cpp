@@ -205,7 +205,7 @@ FObservedMassVisualState ObserveMassVisuals(UWorld* World)
 	}
 
 	VisualState.AntVisualPositions = CollectInstanceLocations(MassSubsystem->GetAntVisualComponent());
-	VisualState.FoodVisualPositions = CollectInstanceLocations(MassSubsystem->GetFoodVisualComponent());
+	VisualState.FoodVisualPositions = CollectInstanceLocations(MassSubsystem->GetFoodRepresentationComponent());
 
 	return VisualState;
 }

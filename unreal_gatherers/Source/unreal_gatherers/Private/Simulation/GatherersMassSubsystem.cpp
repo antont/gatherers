@@ -31,6 +31,7 @@ constexpr TCHAR VisualizerActorName[] = TEXT("GatherersMassVisualizer");
 constexpr TCHAR VisualizerRootName[] = TEXT("Root");
 constexpr TCHAR AntInstancesName[] = TEXT("AntInstances");
 constexpr TCHAR FoodInstancesName[] = TEXT("FoodInstances");
+constexpr ECollisionChannel FoodQueryChannel = ECC_GameTraceChannel1;
 
 FVector ConsumeAntTurnDirection(FGatherersMassAntFragment& AntFragment)
 {
@@ -168,18 +169,18 @@ bool UGatherersMassSubsystem::EnsureVisualComponents()
 		VisualizerActor->AddInstanceComponent(AntVisualComponent);
 	}
 
-	if (!FoodVisualComponent)
+	if (!FoodRepresentationComponent)
 	{
-		FoodVisualComponent = NewObject<UInstancedStaticMeshComponent>(VisualizerActor, FoodInstancesName);
-		VisualizerActor->AddInstanceComponent(FoodVisualComponent);
+		FoodRepresentationComponent = NewObject<UInstancedStaticMeshComponent>(VisualizerActor, FoodInstancesName);
+		VisualizerActor->AddInstanceComponent(FoodRepresentationComponent);
 	}
 
 	ConfigureVisualComponent(*AntVisualComponent, *RootComponent, *VisualSphereMesh, *AntVisualMaterial);
-	ConfigureVisualComponent(*FoodVisualComponent, *RootComponent, *VisualSphereMesh, *FoodVisualMaterial);
+	ConfigureVisualComponent(*FoodRepresentationComponent, *RootComponent, *VisualSphereMesh, *FoodVisualMaterial);
 	AntVisualComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	FoodVisualComponent->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-	FoodVisualComponent->SetCollisionResponseToAllChannels(ECR_Ignore);
-	FoodVisualComponent->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
+	FoodRepresentationComponent->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	FoodRepresentationComponent->SetCollisionResponseToAllChannels(ECR_Ignore);
+	FoodRepresentationComponent->SetCollisionResponseToChannel(FoodQueryChannel, ECR_Block);
 
 	return true;
 }
@@ -187,7 +188,7 @@ bool UGatherersMassSubsystem::EnsureVisualComponents()
 TArray<FMassEntityHandle> UGatherersMassSubsystem::QueryLooseFoodEntitiesOverlappingSphere(const FVector& Center, float Radius) const
 {
 	TArray<FMassEntityHandle> OverlappingFoodEntities;
-	if (!HasManagedSimulation() || FoodVisualComponent == nullptr)
+	if (!HasManagedSimulation() || FoodRepresentationComponent == nullptr)
 	{
 		return OverlappingFoodEntities;
 	}
@@ -205,7 +206,7 @@ TArray<FMassEntityHandle> UGatherersMassSubsystem::QueryLooseFoodEntitiesOverlap
 	}
 
 	FMassEntityManager& EntityManager = MassEntitySubsystem->GetMutableEntityManager();
-	const TArray<int32> OverlappingInstanceIndices = FoodVisualComponent->GetInstancesOverlappingSphere(
+	const TArray<int32> OverlappingInstanceIndices = FoodRepresentationComponent->GetInstancesOverlappingSphere(
 		Center,
 		FMath::Max(0.0f, Radius),
 		true);
@@ -275,7 +276,7 @@ TArray<FMassEntityHandle> UGatherersMassSubsystem::QueryLooseFoodEntitiesAlongSw
 	}
 
 	TArray<FMassEntityHandle> SweptFoodEntities;
-	if (!HasManagedSimulation() || FoodVisualComponent == nullptr)
+	if (!HasManagedSimulation() || FoodRepresentationComponent == nullptr)
 	{
 		return SweptFoodEntities;
 	}
@@ -300,7 +301,7 @@ TArray<FMassEntityHandle> UGatherersMassSubsystem::QueryLooseFoodEntitiesAlongSw
 		SweepStart,
 		SweepEnd,
 		FQuat::Identity,
-		ECC_Visibility,
+		FoodQueryChannel,
 		FCollisionShape::MakeSphere(QueryRadius),
 		QueryParams);
 
@@ -309,7 +310,7 @@ TArray<FMassEntityHandle> UGatherersMassSubsystem::QueryLooseFoodEntitiesAlongSw
 	{
 		for (const FHitResult& Hit : SweepHits)
 		{
-			if (Hit.Component.Get() == FoodVisualComponent && ManagedFoodEntities.IsValidIndex(Hit.Item))
+			if (Hit.Component.Get() == FoodRepresentationComponent && ManagedFoodEntities.IsValidIndex(Hit.Item))
 			{
 				CandidateInstanceIndices.Add(Hit.Item);
 			}
@@ -319,7 +320,7 @@ TArray<FMassEntityHandle> UGatherersMassSubsystem::QueryLooseFoodEntitiesAlongSw
 		SweptBounds += SweepStart;
 		SweptBounds += SweepEnd;
 		SweptBounds = SweptBounds.ExpandBy(QueryRadius);
-		for (const int32 InstanceIndex : FoodVisualComponent->GetInstancesOverlappingBox(SweptBounds, true))
+		for (const int32 InstanceIndex : FoodRepresentationComponent->GetInstancesOverlappingBox(SweptBounds, true))
 		{
 			if (ManagedFoodEntities.IsValidIndex(InstanceIndex))
 			{
@@ -406,7 +407,7 @@ void UGatherersMassSubsystem::RebuildVisualInstances(UMassEntitySubsystem& MassE
 	}
 
 	AntVisualComponent->ClearInstances();
-	FoodVisualComponent->ClearInstances();
+	FoodRepresentationComponent->ClearInstances();
 
 	FMassEntityManager& EntityManager = MassEntitySubsystem.GetMutableEntityManager();
 	for (const FMassEntityHandle AntEntity : ManagedAntEntities)
@@ -430,7 +431,7 @@ void UGatherersMassSubsystem::RebuildVisualInstances(UMassEntitySubsystem& MassE
 
 		FMassEntityView FoodView(EntityManager, FoodEntity);
 		const FGatherersMassFoodFragment& FoodFragment = FoodView.GetFragmentData<FGatherersMassFoodFragment>();
-		FoodVisualComponent->AddInstance(
+		FoodRepresentationComponent->AddInstance(
 			BuildVisualTransform(
 				ComputeFoodVisualPosition(EntityManager, ManagedAntEntities, FoodEntity, FoodFragment),
 				MassFoodVisualScale),
@@ -446,7 +447,7 @@ void UGatherersMassSubsystem::SyncVisualInstances(UMassEntitySubsystem& MassEnti
 	}
 
 	if (AntVisualComponent->GetInstanceCount() != ManagedAntEntities.Num()
-		|| FoodVisualComponent->GetInstanceCount() != ManagedFoodEntities.Num())
+		|| FoodRepresentationComponent->GetInstanceCount() != ManagedFoodEntities.Num())
 	{
 		RebuildVisualInstances(MassEntitySubsystem);
 		return;
@@ -483,7 +484,7 @@ void UGatherersMassSubsystem::SyncVisualInstances(UMassEntitySubsystem& MassEnti
 
 		FMassEntityView FoodView(EntityManager, FoodEntity);
 		const FGatherersMassFoodFragment& FoodFragment = FoodView.GetFragmentData<FGatherersMassFoodFragment>();
-		FoodVisualComponent->UpdateInstanceTransform(
+		FoodRepresentationComponent->UpdateInstanceTransform(
 			FoodIndex,
 			BuildVisualTransform(
 				ComputeFoodVisualPosition(EntityManager, ManagedAntEntities, FoodEntity, FoodFragment),
@@ -701,9 +702,9 @@ void UGatherersMassSubsystem::ResetSimulation()
 	{
 		AntVisualComponent->ClearInstances();
 	}
-	if (FoodVisualComponent != nullptr)
+	if (FoodRepresentationComponent != nullptr)
 	{
-		FoodVisualComponent->ClearInstances();
+		FoodRepresentationComponent->ClearInstances();
 	}
 
 	for (const FMassEntityHandle Entity : ManagedAntEntities)
@@ -752,7 +753,7 @@ const UInstancedStaticMeshComponent* UGatherersMassSubsystem::GetAntVisualCompon
 	return AntVisualComponent;
 }
 
-const UInstancedStaticMeshComponent* UGatherersMassSubsystem::GetFoodVisualComponent() const
+const UInstancedStaticMeshComponent* UGatherersMassSubsystem::GetFoodRepresentationComponent() const
 {
-	return FoodVisualComponent;
+	return FoodRepresentationComponent;
 }

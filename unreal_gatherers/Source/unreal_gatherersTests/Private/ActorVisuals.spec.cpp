@@ -57,7 +57,7 @@ bool FGatherersActorVisualsAutomationTest::RunTest(const FString& Parameters)
 	}
 
 	const UInstancedStaticMeshComponent* AntVisual = MassSubsystem->GetAntVisualComponent();
-	const UInstancedStaticMeshComponent* FoodVisual = MassSubsystem->GetFoodVisualComponent();
+	const UInstancedStaticMeshComponent* FoodVisual = MassSubsystem->GetFoodRepresentationComponent();
 	TestNotNull(TEXT("ant should have a visible instanced mesh component"), const_cast<UInstancedStaticMeshComponent*>(AntVisual));
 	TestNotNull(TEXT("food should have a visible instanced mesh component"), const_cast<UInstancedStaticMeshComponent*>(FoodVisual));
 

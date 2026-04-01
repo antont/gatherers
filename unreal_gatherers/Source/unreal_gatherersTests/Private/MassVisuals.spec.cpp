@@ -147,7 +147,7 @@ bool FGatherersMassVisualsAutomationTest::RunTest(const FString& Parameters)
 	MassSubsystem->Tick(0.1f);
 
 	const UInstancedStaticMeshComponent* AntVisual = MassSubsystem->GetAntVisualComponent();
-	const UInstancedStaticMeshComponent* FoodVisual = MassSubsystem->GetFoodVisualComponent();
+	const UInstancedStaticMeshComponent* FoodVisual = MassSubsystem->GetFoodRepresentationComponent();
 	TestNotNull(TEXT("ant instanced visual should exist on the gatherers Mass subsystem"), const_cast<UInstancedStaticMeshComponent*>(AntVisual));
 	TestNotNull(TEXT("food instanced visual should exist on the gatherers Mass subsystem"), const_cast<UInstancedStaticMeshComponent*>(FoodVisual));
 
