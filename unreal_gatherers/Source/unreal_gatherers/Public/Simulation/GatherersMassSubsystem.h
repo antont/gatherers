@@ -75,6 +75,7 @@ public:
 
 private:
 	bool EnsureVisualComponents();
+	TArray<FMassEntityHandle> QueryLooseFoodEntitiesAlongSweep(const FVector& SweepStart, const FVector& SweepEnd, float Radius) const;
 	void RebuildVisualInstances(UMassEntitySubsystem& MassEntitySubsystem);
 	void SyncVisualInstances(UMassEntitySubsystem& MassEntitySubsystem);
 

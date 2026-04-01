@@ -179,6 +179,7 @@ bool UGatherersMassSubsystem::EnsureVisualComponents()
 	AntVisualComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	FoodVisualComponent->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 	FoodVisualComponent->SetCollisionResponseToAllChannels(ECR_Ignore);
+	FoodVisualComponent->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
 
 	return true;
 }
@@ -260,6 +261,129 @@ TArray<FMassEntityHandle> UGatherersMassSubsystem::QueryLooseFoodEntitiesOverlap
 	}
 
 	return OverlappingFoodEntities;
+}
+
+TArray<FMassEntityHandle> UGatherersMassSubsystem::QueryLooseFoodEntitiesAlongSweep(
+	const FVector& SweepStart,
+	const FVector& SweepEnd,
+	float Radius) const
+{
+	const float QueryRadius = FMath::Max(0.0f, Radius);
+	if (SweepStart.Equals(SweepEnd))
+	{
+		return QueryLooseFoodEntitiesOverlappingSphere(SweepStart, QueryRadius);
+	}
+
+	TArray<FMassEntityHandle> SweptFoodEntities;
+	if (!HasManagedSimulation() || FoodVisualComponent == nullptr)
+	{
+		return SweptFoodEntities;
+	}
+
+	UWorld* World = GetWorld();
+	if (World == nullptr)
+	{
+		return SweptFoodEntities;
+	}
+
+	UMassEntitySubsystem* MassEntitySubsystem = World->GetSubsystem<UMassEntitySubsystem>();
+	if (MassEntitySubsystem == nullptr)
+	{
+		return SweptFoodEntities;
+	}
+
+	TArray<FHitResult> SweepHits;
+	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(GatherersMassFoodSweep), false);
+	QueryParams.bTraceComplex = false;
+	const bool bAnySweepHits = World->SweepMultiByChannel(
+		SweepHits,
+		SweepStart,
+		SweepEnd,
+		FQuat::Identity,
+		ECC_Visibility,
+		FCollisionShape::MakeSphere(QueryRadius),
+		QueryParams);
+
+	TSet<int32> CandidateInstanceIndices;
+	if (bAnySweepHits)
+	{
+		for (const FHitResult& Hit : SweepHits)
+		{
+			if (Hit.Component.Get() == FoodVisualComponent && ManagedFoodEntities.IsValidIndex(Hit.Item))
+			{
+				CandidateInstanceIndices.Add(Hit.Item);
+			}
+		}
+	}
+
+	if (bAnySweepHits && CandidateInstanceIndices.IsEmpty())
+	{
+		FBox SweptBounds(ForceInit);
+		SweptBounds += SweepStart;
+		SweptBounds += SweepEnd;
+		SweptBounds = SweptBounds.ExpandBy(QueryRadius);
+		for (const int32 InstanceIndex : FoodVisualComponent->GetInstancesOverlappingBox(SweptBounds, true))
+		{
+			if (ManagedFoodEntities.IsValidIndex(InstanceIndex))
+			{
+				CandidateInstanceIndices.Add(InstanceIndex);
+			}
+		}
+	}
+
+	struct FSweptLooseFoodHit
+	{
+		FMassEntityHandle Entity;
+		int32 InstanceIndex = INDEX_NONE;
+		float DistanceAlongPathSquared = TNumericLimits<float>::Max();
+	};
+
+	FMassEntityManager& EntityManager = MassEntitySubsystem->GetMutableEntityManager();
+	TArray<FSweptLooseFoodHit> Hits;
+	for (const int32 InstanceIndex : CandidateInstanceIndices)
+	{
+		const FMassEntityHandle FoodEntity = ManagedFoodEntities[InstanceIndex];
+		if (!EntityManager.IsEntityValid(FoodEntity))
+		{
+			continue;
+		}
+
+		FMassEntityView FoodView(EntityManager, FoodEntity);
+		const FGatherersMassFoodFragment& FoodFragment = FoodView.GetFragmentData<FGatherersMassFoodFragment>();
+		if (!FoodFragment.bIsLoose)
+		{
+			continue;
+		}
+
+		const FVector ClosestPoint = FMath::ClosestPointOnSegment(FoodFragment.Position, SweepStart, SweepEnd);
+		if (FVector::DistSquared(ClosestPoint, FoodFragment.Position) > FMath::Square(QueryRadius))
+		{
+			continue;
+		}
+
+		Hits.Add({
+			FoodEntity,
+			InstanceIndex,
+			FVector::DistSquared(SweepStart, ClosestPoint),
+		});
+	}
+
+	Hits.Sort([](const FSweptLooseFoodHit& A, const FSweptLooseFoodHit& B)
+	{
+		if (!FMath::IsNearlyEqual(A.DistanceAlongPathSquared, B.DistanceAlongPathSquared))
+		{
+			return A.DistanceAlongPathSquared < B.DistanceAlongPathSquared;
+		}
+
+		return A.InstanceIndex < B.InstanceIndex;
+	});
+
+	for (const FSweptLooseFoodHit& Hit : Hits)
+	{
+		SweptFoodEntities.Add(Hit.Entity);
+	}
+
+	return SweptFoodEntities;
 }
 
 void UGatherersMassSubsystem::RebuildVisualInstances(UMassEntitySubsystem& MassEntitySubsystem)
@@ -392,6 +516,7 @@ void UGatherersMassSubsystem::Tick(float DeltaTime)
 		AntFragment.PickupCooldownRemainingSeconds = ComputeRemainingPickupCooldown(
 			AntFragment.PickupCooldownRemainingSeconds,
 			DeltaTime);
+		const FVector PreviousPosition = AntFragment.Position;
 		AntFragment.Position = ComputeAntHeadingMovementStep(
 			AntFragment.Position,
 			AntFragment.Direction,
@@ -430,7 +555,8 @@ void UGatherersMassSubsystem::Tick(float DeltaTime)
 			}
 		}
 
-		const TArray<FMassEntityHandle> NearbyFoodEntities = QueryLooseFoodEntitiesOverlappingSphere(
+		const TArray<FMassEntityHandle> NearbyFoodEntities = QueryLooseFoodEntitiesAlongSweep(
+			PreviousPosition,
 			AntFragment.Position,
 			MassPickupRadius);
 		const FMassEntityHandle NearbyFoodEntity = NearbyFoodEntities.IsEmpty()
