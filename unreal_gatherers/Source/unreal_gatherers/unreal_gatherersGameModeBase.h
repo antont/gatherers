@@ -22,6 +22,7 @@ public:
 	virtual void StartPlay() override;
 
 	void ApplyTimeControlMode(EGatherersTimeControlMode NewMode);
+	static void ApplyTimeControlModeToWorld(UWorld& World, EGatherersTimeControlMode NewMode);
 	EGatherersTimeControlMode GetTimeControlMode() const;
 	EGatherersTimeControlMode GetStartupTimeControlMode() const;
 	static float GetTimeDilationForMode(EGatherersTimeControlMode Mode);

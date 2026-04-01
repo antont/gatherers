@@ -259,14 +259,7 @@ bool FGatherersFullSimulationFastWorldTimeSweptPickupAutomationTest::RunTest(con
 		return false;
 	}
 
-	Aunreal_gatherersGameModeBase* GameMode = World->GetAuthGameMode<Aunreal_gatherersGameModeBase>();
-	TestNotNull(TEXT("time-scaled full-sim game mode should exist"), GameMode);
-	if (GameMode == nullptr)
-	{
-		return false;
-	}
-
-	GameMode->ApplyTimeControlMode(EGatherersTimeControlMode::Fast);
+	Aunreal_gatherersGameModeBase::ApplyTimeControlModeToWorld(*World, EGatherersTimeControlMode::Fast);
 
 	FGatherersSpawnPlan Plan;
 	Plan.bUseFullSimulationMode = true;
@@ -286,7 +279,7 @@ bool FGatherersFullSimulationFastWorldTimeSweptPickupAutomationTest::RunTest(con
 
 	const float RealSeconds = 0.25f;
 	const float SimulatedSeconds = RealSeconds
-		* Aunreal_gatherersGameModeBase::GetTimeDilationForMode(GameMode->GetTimeControlMode());
+		* Aunreal_gatherersGameModeBase::GetTimeDilationForMode(EGatherersTimeControlMode::Fast);
 	MassSubsystem->Tick(SimulatedSeconds);
 
 	UMassEntitySubsystem* MassEntitySubsystem = World->GetSubsystem<UMassEntitySubsystem>();
@@ -306,6 +299,6 @@ bool FGatherersFullSimulationFastWorldTimeSweptPickupAutomationTest::RunTest(con
 		AntFragment.CarriedFoodEntity == MassSubsystem->ManagedFoodEntities[0] && !FoodFragment.bIsLoose);
 
 	MassSubsystem->ResetSimulation();
-	GameMode->ApplyTimeControlMode(EGatherersTimeControlMode::Normal);
+	Aunreal_gatherersGameModeBase::ApplyTimeControlModeToWorld(*World, EGatherersTimeControlMode::Normal);
 	return true;
 }

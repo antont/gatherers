@@ -29,14 +29,26 @@ void Aunreal_gatherersGameModeBase::StartPlay()
 
 void Aunreal_gatherersGameModeBase::ApplyTimeControlMode(EGatherersTimeControlMode NewMode)
 {
-	CurrentTimeControlMode = NewMode;
-
 	if (UWorld* World = GetWorld())
 	{
-		if (AWorldSettings* WorldSettings = World->GetWorldSettings())
-		{
-			WorldSettings->SetTimeDilation(GetTimeDilationForMode(NewMode));
-		}
+		ApplyTimeControlModeToWorld(*World, NewMode);
+	}
+	else
+	{
+		CurrentTimeControlMode = NewMode;
+	}
+}
+
+void Aunreal_gatherersGameModeBase::ApplyTimeControlModeToWorld(UWorld& World, EGatherersTimeControlMode NewMode)
+{
+	if (AWorldSettings* WorldSettings = World.GetWorldSettings())
+	{
+		WorldSettings->SetTimeDilation(GetTimeDilationForMode(NewMode));
+	}
+
+	if (Aunreal_gatherersGameModeBase* GatherersGameMode = World.GetAuthGameMode<Aunreal_gatherersGameModeBase>())
+	{
+		GatherersGameMode->CurrentTimeControlMode = NewMode;
 	}
 }
 

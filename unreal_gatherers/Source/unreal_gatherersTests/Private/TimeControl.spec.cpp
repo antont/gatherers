@@ -54,13 +54,6 @@ public:
 			return true;
 		}
 
-		Aunreal_gatherersGameModeBase* GameMode = World->GetAuthGameMode<Aunreal_gatherersGameModeBase>();
-		Test->TestNotNull(TEXT("time-control game mode should exist"), GameMode);
-		if (GameMode == nullptr)
-		{
-			return true;
-		}
-
 		UGatherersMassSubsystem* MassSubsystem = World->GetSubsystem<UGatherersMassSubsystem>();
 		Test->TestNotNull(TEXT("time-control Mass subsystem should exist"), MassSubsystem);
 		if (MassSubsystem == nullptr)
@@ -68,7 +61,7 @@ public:
 			return true;
 		}
 
-		GameMode->ApplyTimeControlMode(Mode);
+		Aunreal_gatherersGameModeBase::ApplyTimeControlModeToWorld(*World, Mode);
 		MassSubsystem->ResetSimulation();
 		const FGatherersSpawnPlan Plan = BuildTimeControlFixturePlan();
 		SpawnGatherersActors(*World, Plan);
