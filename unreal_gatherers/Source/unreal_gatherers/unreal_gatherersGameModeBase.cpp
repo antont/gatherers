@@ -45,6 +45,11 @@ EGatherersTimeControlMode Aunreal_gatherersGameModeBase::GetTimeControlMode() co
 	return CurrentTimeControlMode;
 }
 
+EGatherersTimeControlMode Aunreal_gatherersGameModeBase::GetStartupTimeControlMode() const
+{
+	return StartupTimeControlMode;
+}
+
 float Aunreal_gatherersGameModeBase::GetTimeDilationForMode(EGatherersTimeControlMode Mode)
 {
 	switch (Mode)

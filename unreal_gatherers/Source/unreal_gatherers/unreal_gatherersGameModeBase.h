@@ -23,6 +23,7 @@ public:
 
 	void ApplyTimeControlMode(EGatherersTimeControlMode NewMode);
 	EGatherersTimeControlMode GetTimeControlMode() const;
+	EGatherersTimeControlMode GetStartupTimeControlMode() const;
 	static float GetTimeDilationForMode(EGatherersTimeControlMode Mode);
 
 private:
