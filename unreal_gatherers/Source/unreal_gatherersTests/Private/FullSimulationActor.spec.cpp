@@ -140,6 +140,11 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	"default.unreal_gatherers.FullSimulationActorFixture.HighSpeedMovementStillPicksUpWithoutTunneling",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FGatherersFullSimulationHighSpeedSweptPickupAutomationTest,
+	"default.unreal_gatherers.FullSimulationActorFixture.HighSpeedMovementPicksUpFoodAlongSweptPath",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
 bool FGatherersFullSimulationHighSpeedPickupAutomationTest::RunTest(const FString& Parameters)
 {
 	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
@@ -186,6 +191,53 @@ bool FGatherersFullSimulationHighSpeedPickupAutomationTest::RunTest(const FStrin
 	const FGatherersMassFoodFragment& FoodFragment = FoodView.GetFragmentData<FGatherersMassFoodFragment>();
 	TestTrue(
 		TEXT("safe-step movement still lets a nearby food be picked up during a long high-speed frame"),
+		AntFragment.CarriedFoodEntity == MassSubsystem->ManagedFoodEntities[0] && !FoodFragment.bIsLoose);
+
+	MassSubsystem->ResetSimulation();
+	return true;
+}
+
+bool FGatherersFullSimulationHighSpeedSweptPickupAutomationTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	UGatherersMassSubsystem* MassSubsystem = RequireMassSubsystem(*this, World);
+	if (MassSubsystem == nullptr)
+	{
+		return false;
+	}
+
+	FGatherersSpawnPlan Plan;
+	Plan.bUseFullSimulationMode = true;
+	Plan.bSpawnActorVisuals = false;
+	Plan.PlayAreaBounds = FBox(FVector(-500.0f, -500.0f, -100.0f), FVector(500.0f, 500.0f, 100.0f));
+	Plan.AntSpawns.Add(FTransform(FVector::ZeroVector));
+	Plan.AntInitialDirections.Add(FVector(1.0f, 0.0f, 0.0f));
+	Plan.FoodSpawns.Add(FTransform(FVector(0.0f, 14.0f, 0.0f)));
+	Plan.FullSimulationMovementSpeed = 5000.0f;
+	Plan.FullSimulationTurnJitterRadians = 0.0f;
+
+	SpawnGatherersActors(*World, Plan);
+	if (MassSubsystem->GetManagedAntCount() != 1 || MassSubsystem->GetManagedFoodCount() != 1)
+	{
+		return false;
+	}
+
+	MassSubsystem->Tick(1.0f);
+
+	UMassEntitySubsystem* MassEntitySubsystem = World->GetSubsystem<UMassEntitySubsystem>();
+	TestNotNull(TEXT("Mass entity subsystem should exist"), MassEntitySubsystem);
+	if (MassEntitySubsystem == nullptr)
+	{
+		return false;
+	}
+
+	FMassEntityManager& EntityManager = MassEntitySubsystem->GetMutableEntityManager();
+	FMassEntityView AntView(EntityManager, MassSubsystem->ManagedAntEntities[0]);
+	FMassEntityView FoodView(EntityManager, MassSubsystem->ManagedFoodEntities[0]);
+	const FGatherersMassAntFragment& AntFragment = AntView.GetFragmentData<FGatherersMassAntFragment>();
+	const FGatherersMassFoodFragment& FoodFragment = FoodView.GetFragmentData<FGatherersMassFoodFragment>();
+	TestTrue(
+		TEXT("high-speed pickup should detect loose food intersected by the ant's traveled path even when the endpoint sphere no longer overlaps"),
 		AntFragment.CarriedFoodEntity == MassSubsystem->ManagedFoodEntities[0] && !FoodFragment.bIsLoose);
 
 	MassSubsystem->ResetSimulation();
