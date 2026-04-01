@@ -3,18 +3,26 @@
 #include "MassEntitySubsystem.h"
 #include "MassEntityView.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/Optional.h"
 #include "Simulation/GatherersMassSubsystem.h"
 #include "Simulation/GatherersSpawnPlan.h"
 #include "Simulation/GatherersWorldSpawner.h"
 #include "Tests/AutomationCommon.h"
 #include "Tests/AutomationEditorCommon.h"
 #include "TestLogic/GatherersWorldAssertions.h"
+#include "Templates/SharedPointer.h"
 #include "unreal_gatherers/unreal_gatherersGameModeBase.h"
 
 namespace
 {
 constexpr TCHAR SimBlankMapPath[] = TEXT("/Game/SimBlank/Levels/SimBlank");
 constexpr double ObservationWindowSeconds = 0.3;
+
+struct FTimeControlObservationResults
+{
+	float NormalDistance = 0.0f;
+	float FastDistance = 0.0f;
+};
 
 FGatherersSpawnPlan BuildTimeControlFixturePlan()
 {
@@ -76,17 +84,26 @@ private:
 class FGatherersObserveTimeControlDistanceCommand : public IAutomationLatentCommand
 {
 public:
-	FGatherersObserveTimeControlDistanceCommand(FAutomationTestBase* InTest, double InObservationWindowSeconds, float* InOutDistance)
+	FGatherersObserveTimeControlDistanceCommand(
+		FAutomationTestBase* InTest,
+		double InObservationWindowSeconds,
+		TSharedRef<FTimeControlObservationResults> InResults,
+		bool bInObserveFastDistance)
 		: Test(InTest),
 		  ObservationWindowSeconds(InObservationWindowSeconds),
-		  OutDistance(InOutDistance),
-		  StartTimeSeconds(FPlatformTime::Seconds())
+		  Results(InResults),
+		  bObserveFastDistance(bInObserveFastDistance)
 	{
 	}
 
 	bool Update() override
 	{
-		if (FPlatformTime::Seconds() - StartTimeSeconds < ObservationWindowSeconds)
+		if (!StartTimeSeconds.IsSet())
+		{
+			StartTimeSeconds = FPlatformTime::Seconds();
+		}
+
+		if (FPlatformTime::Seconds() - StartTimeSeconds.GetValue() < ObservationWindowSeconds)
 		{
 			return false;
 		}
@@ -110,40 +127,48 @@ public:
 		FMassEntityManager& EntityManager = MassEntitySubsystem->GetMutableEntityManager();
 		FMassEntityView AntView(EntityManager, MassSubsystem->ManagedAntEntities[0]);
 		const FGatherersMassAntFragment& AntFragment = AntView.GetFragmentData<FGatherersMassAntFragment>();
-		*OutDistance = AntFragment.Position.X;
+		if (bObserveFastDistance)
+		{
+			Results->FastDistance = AntFragment.Position.X;
+		}
+		else
+		{
+			Results->NormalDistance = AntFragment.Position.X;
+		}
 		return true;
 	}
 
 private:
 	FAutomationTestBase* Test;
 	double ObservationWindowSeconds;
-	float* OutDistance;
-	double StartTimeSeconds;
+	TSharedRef<FTimeControlObservationResults> Results;
+	bool bObserveFastDistance;
+	TOptional<double> StartTimeSeconds;
 };
 
 class FGatherersAssertFastModeAdvancesFurtherCommand : public IAutomationLatentCommand
 {
 public:
-	FGatherersAssertFastModeAdvancesFurtherCommand(FAutomationTestBase* InTest, const float* InNormalDistance, const float* InFastDistance)
+	FGatherersAssertFastModeAdvancesFurtherCommand(
+		FAutomationTestBase* InTest,
+		TSharedRef<FTimeControlObservationResults> InResults)
 		: Test(InTest),
-		  NormalDistance(InNormalDistance),
-		  FastDistance(InFastDistance)
+		  Results(InResults)
 	{
 	}
 
 	bool Update() override
 	{
-		Test->TestTrue(TEXT("normal mode should advance the ant at least a little"), *NormalDistance > 1.0f);
+		Test->TestTrue(TEXT("normal mode should advance the ant at least a little"), Results->NormalDistance > 1.0f);
 		Test->TestTrue(
 			TEXT("fast world time should advance the ant farther than normal over the same wall-clock window"),
-			*FastDistance > (*NormalDistance + 10.0f));
+			Results->FastDistance > (Results->NormalDistance + 10.0f));
 		return true;
 	}
 
 private:
 	FAutomationTestBase* Test;
-	const float* NormalDistance;
-	const float* FastDistance;
+	TSharedRef<FTimeControlObservationResults> Results;
 };
 
 DEFINE_LATENT_AUTOMATION_COMMAND_THREE_PARAMETER(
@@ -180,14 +205,15 @@ bool FGatherersWorldTimeControlAutomationTest::RunTest(const FString& Parameters
 		return false;
 	}
 
-	float NormalDistance = 0.0f;
-	float FastDistance = 0.0f;
+	const TSharedRef<FTimeControlObservationResults> ObservationResults = MakeShared<FTimeControlObservationResults>();
 
 	ADD_LATENT_AUTOMATION_COMMAND(FGatherersPrepareTimeControlFixtureCommand(this, EGatherersTimeControlMode::Normal));
-	ADD_LATENT_AUTOMATION_COMMAND(FGatherersObserveTimeControlDistanceCommand(this, ObservationWindowSeconds, &NormalDistance));
+	ADD_LATENT_AUTOMATION_COMMAND(
+		FGatherersObserveTimeControlDistanceCommand(this, ObservationWindowSeconds, ObservationResults, false));
 	ADD_LATENT_AUTOMATION_COMMAND(FGatherersPrepareTimeControlFixtureCommand(this, EGatherersTimeControlMode::Fast));
-	ADD_LATENT_AUTOMATION_COMMAND(FGatherersObserveTimeControlDistanceCommand(this, ObservationWindowSeconds, &FastDistance));
-	ADD_LATENT_AUTOMATION_COMMAND(FGatherersAssertFastModeAdvancesFurtherCommand(this, &NormalDistance, &FastDistance));
+	ADD_LATENT_AUTOMATION_COMMAND(
+		FGatherersObserveTimeControlDistanceCommand(this, ObservationWindowSeconds, ObservationResults, true));
+	ADD_LATENT_AUTOMATION_COMMAND(FGatherersAssertFastModeAdvancesFurtherCommand(this, ObservationResults));
 	ADD_LATENT_AUTOMATION_COMMAND(FEndPlayMapCommand());
 	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForTimeControlPIECleanupCommand(this, FPlatformTime::Seconds(), 5.0));
 	return true;
