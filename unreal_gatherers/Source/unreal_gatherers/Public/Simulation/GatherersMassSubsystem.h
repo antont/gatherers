@@ -64,6 +64,7 @@ public:
 
 	void InitializeHybridSimulation(const FGatherersSpawnResult& SpawnResult, const FGatherersSpawnPlan& Plan);
 	void ResetSimulation();
+	TArray<FMassEntityHandle> QueryLooseFoodEntitiesOverlappingSphere(const FVector& Center, float Radius) const;
 
 	int32 GetManagedAntCount() const;
 	int32 GetManagedFoodCount() const;

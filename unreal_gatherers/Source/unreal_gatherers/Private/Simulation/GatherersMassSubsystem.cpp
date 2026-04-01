@@ -32,37 +32,6 @@ constexpr TCHAR VisualizerRootName[] = TEXT("Root");
 constexpr TCHAR AntInstancesName[] = TEXT("AntInstances");
 constexpr TCHAR FoodInstancesName[] = TEXT("FoodInstances");
 
-FGatherersMassFoodFragment* FindLooseFoodInPickupRadius(
-	FMassEntityManager& EntityManager,
-	const TArray<FMassEntityHandle>& FoodEntities,
-	const FVector& AntPosition,
-	FMassEntityHandle& OutFoodEntity)
-{
-	for (const FMassEntityHandle FoodEntity : FoodEntities)
-	{
-		if (!EntityManager.IsEntityValid(FoodEntity))
-		{
-			continue;
-		}
-
-		FMassEntityView FoodView(EntityManager, FoodEntity);
-		FGatherersMassFoodFragment& FoodFragment = FoodView.GetFragmentData<FGatherersMassFoodFragment>();
-		if (!FoodFragment.bIsLoose)
-		{
-			continue;
-		}
-
-		if (ShouldAntPickUpFood(AntPosition, FoodFragment.Position, MassPickupRadius))
-		{
-			OutFoodEntity = FoodEntity;
-			return &FoodFragment;
-		}
-	}
-
-	OutFoodEntity.Reset();
-	return nullptr;
-}
-
 FVector ConsumeAntTurnDirection(FGatherersMassAntFragment& AntFragment)
 {
 	FRandomStream RandomStream(AntFragment.RandomSeed);
@@ -207,8 +176,90 @@ bool UGatherersMassSubsystem::EnsureVisualComponents()
 
 	ConfigureVisualComponent(*AntVisualComponent, *RootComponent, *VisualSphereMesh, *AntVisualMaterial);
 	ConfigureVisualComponent(*FoodVisualComponent, *RootComponent, *VisualSphereMesh, *FoodVisualMaterial);
+	AntVisualComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	FoodVisualComponent->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	FoodVisualComponent->SetCollisionResponseToAllChannels(ECR_Ignore);
 
 	return true;
+}
+
+TArray<FMassEntityHandle> UGatherersMassSubsystem::QueryLooseFoodEntitiesOverlappingSphere(const FVector& Center, float Radius) const
+{
+	TArray<FMassEntityHandle> OverlappingFoodEntities;
+	if (!HasManagedSimulation() || FoodVisualComponent == nullptr)
+	{
+		return OverlappingFoodEntities;
+	}
+
+	UWorld* World = GetWorld();
+	if (World == nullptr)
+	{
+		return OverlappingFoodEntities;
+	}
+
+	UMassEntitySubsystem* MassEntitySubsystem = World->GetSubsystem<UMassEntitySubsystem>();
+	if (MassEntitySubsystem == nullptr)
+	{
+		return OverlappingFoodEntities;
+	}
+
+	FMassEntityManager& EntityManager = MassEntitySubsystem->GetMutableEntityManager();
+	const TArray<int32> OverlappingInstanceIndices = FoodVisualComponent->GetInstancesOverlappingSphere(
+		Center,
+		FMath::Max(0.0f, Radius),
+		true);
+
+	struct FIndexedLooseFoodHit
+	{
+		FMassEntityHandle Entity;
+		int32 InstanceIndex = INDEX_NONE;
+		float DistanceSquared = TNumericLimits<float>::Max();
+	};
+
+	TArray<FIndexedLooseFoodHit> Hits;
+	for (const int32 InstanceIndex : OverlappingInstanceIndices)
+	{
+		if (!ManagedFoodEntities.IsValidIndex(InstanceIndex))
+		{
+			continue;
+		}
+
+		const FMassEntityHandle FoodEntity = ManagedFoodEntities[InstanceIndex];
+		if (!EntityManager.IsEntityValid(FoodEntity))
+		{
+			continue;
+		}
+
+		FMassEntityView FoodView(EntityManager, FoodEntity);
+		const FGatherersMassFoodFragment& FoodFragment = FoodView.GetFragmentData<FGatherersMassFoodFragment>();
+		if (!FoodFragment.bIsLoose)
+		{
+			continue;
+		}
+
+		Hits.Add({
+			FoodEntity,
+			InstanceIndex,
+			FVector::DistSquared(Center, FoodFragment.Position),
+		});
+	}
+
+	Hits.Sort([](const FIndexedLooseFoodHit& A, const FIndexedLooseFoodHit& B)
+	{
+		if (!FMath::IsNearlyEqual(A.DistanceSquared, B.DistanceSquared))
+		{
+			return A.DistanceSquared < B.DistanceSquared;
+		}
+
+		return A.InstanceIndex < B.InstanceIndex;
+	});
+
+	for (const FIndexedLooseFoodHit& Hit : Hits)
+	{
+		OverlappingFoodEntities.Add(Hit.Entity);
+	}
+
+	return OverlappingFoodEntities;
 }
 
 void UGatherersMassSubsystem::RebuildVisualInstances(UMassEntitySubsystem& MassEntitySubsystem)
@@ -379,12 +430,18 @@ void UGatherersMassSubsystem::Tick(float DeltaTime)
 			}
 		}
 
-		FMassEntityHandle NearbyFoodEntity;
-		FGatherersMassFoodFragment* NearbyFood = FindLooseFoodInPickupRadius(
-			EntityManager,
-			ManagedFoodEntities,
+		const TArray<FMassEntityHandle> NearbyFoodEntities = QueryLooseFoodEntitiesOverlappingSphere(
 			AntFragment.Position,
-			NearbyFoodEntity);
+			MassPickupRadius);
+		const FMassEntityHandle NearbyFoodEntity = NearbyFoodEntities.IsEmpty()
+			? FMassEntityHandle()
+			: NearbyFoodEntities[0];
+		FGatherersMassFoodFragment* NearbyFood = nullptr;
+		if (NearbyFoodEntity.IsSet() && EntityManager.IsEntityValid(NearbyFoodEntity))
+		{
+			FMassEntityView NearbyFoodView(EntityManager, NearbyFoodEntity);
+			NearbyFood = &NearbyFoodView.GetFragmentData<FGatherersMassFoodFragment>();
+		}
 
 		if (AntFragment.CarriedFoodEntity.IsValid() && NearbyFood != nullptr)
 		{
