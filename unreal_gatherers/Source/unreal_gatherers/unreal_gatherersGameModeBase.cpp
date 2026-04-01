@@ -13,7 +13,7 @@
 
 namespace
 {
-const FBox DefaultGamePlayAreaBounds(FVector(-640.0f, -360.0f, -100.0f), FVector(640.0f, 360.0f, 100.0f));
+const FBox DefaultGamePlayAreaBounds(FVector(-1280.0f, -720.0f, -100.0f), FVector(1280.0f, 720.0f, 100.0f));
 constexpr float GatherersFastTimeDilation = 4.0f;
 constexpr float GatherersMaxCorrectTimeDilation = 27.0f;
 }
