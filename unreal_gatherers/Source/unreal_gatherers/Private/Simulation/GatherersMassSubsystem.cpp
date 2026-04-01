@@ -632,13 +632,16 @@ void UGatherersMassSubsystem::InitializeHybridSimulation(const FGatherersSpawnRe
 	{
 		FGatherersMassFoodFragment FoodFragment;
 		FoodFragment.Position = Plan.FoodSpawns[FoodIndex].GetLocation();
-		FoodFragment.ProxyActor = SpawnResult.Foods.IsValidIndex(FoodIndex) ? SpawnResult.Foods[FoodIndex] : nullptr;
 
 		TArray<FInstancedStruct, TInlineAllocator<1>> FoodFragments;
 		FoodFragments.Add(FInstancedStruct::Make(FoodFragment));
 		const FMassEntityHandle FoodEntity = EntityManager.CreateEntity(FoodFragments);
 		EntityManager.AddTagToEntity(FoodEntity, FGatherersMassFoodTag::StaticStruct());
 		ManagedFoodEntities.Add(FoodEntity);
+		if (SpawnResult.Foods.IsValidIndex(FoodIndex) && SpawnResult.Foods[FoodIndex] != nullptr)
+		{
+			FoodProxyActors.Add(FoodEntity, SpawnResult.Foods[FoodIndex]);
+		}
 	}
 
 	for (int32 AntIndex = 0; AntIndex < Plan.AntSpawns.Num(); ++AntIndex)
@@ -654,7 +657,6 @@ void UGatherersMassSubsystem::InitializeHybridSimulation(const FGatherersSpawnRe
 			AntFragment.Direction = FVector(1.0f, 0.0f, 0.0f);
 		}
 
-		AntFragment.ProxyActor = SpawnResult.Ants.IsValidIndex(AntIndex) ? SpawnResult.Ants[AntIndex] : nullptr;
 		AntFragment.RandomSeed = Plan.RandomSeedBase + AntIndex;
 		AntFragment.MovementSpeed = FMath::Max(0.0f, Plan.FullSimulationMovementSpeed);
 		AntFragment.TurnJitterRadians = FMath::Max(0.0f, Plan.FullSimulationTurnJitterRadians);
@@ -664,6 +666,10 @@ void UGatherersMassSubsystem::InitializeHybridSimulation(const FGatherersSpawnRe
 		const FMassEntityHandle AntEntity = EntityManager.CreateEntity(AntFragments);
 		EntityManager.AddTagToEntity(AntEntity, FGatherersMassAntTag::StaticStruct());
 		ManagedAntEntities.Add(AntEntity);
+		if (SpawnResult.Ants.IsValidIndex(AntIndex) && SpawnResult.Ants[AntIndex] != nullptr)
+		{
+			AntProxyActors.Add(AntEntity, SpawnResult.Ants[AntIndex]);
+		}
 	}
 
 	RebuildVisualInstances(*MassEntitySubsystem);
@@ -676,6 +682,8 @@ void UGatherersMassSubsystem::ResetSimulation()
 	{
 		ManagedAntEntities.Reset();
 		ManagedFoodEntities.Reset();
+		AntProxyActors.Reset();
+		FoodProxyActors.Reset();
 		return;
 	}
 
@@ -684,6 +692,8 @@ void UGatherersMassSubsystem::ResetSimulation()
 	{
 		ManagedAntEntities.Reset();
 		ManagedFoodEntities.Reset();
+		AntProxyActors.Reset();
+		FoodProxyActors.Reset();
 		return;
 	}
 
@@ -722,6 +732,8 @@ void UGatherersMassSubsystem::ResetSimulation()
 
 	ManagedAntEntities.Reset();
 	ManagedFoodEntities.Reset();
+	AntProxyActors.Reset();
+	FoodProxyActors.Reset();
 	SimulationBounds = FBox(EForceInit::ForceInit);
 	AccumulatedSimulationSeconds = 0.0f;
 	SimulationTimeAccumulatorSeconds = 0.0f;
@@ -790,6 +802,26 @@ float UGatherersMassSubsystem::GetSimulationRateMultiplier() const
 float UGatherersMassSubsystem::GetFixedSimulationStepSeconds() const
 {
 	return FixedSimulationStepSeconds;
+}
+
+AAnt* UGatherersMassSubsystem::GetAntProxyActor(FMassEntityHandle AntEntity) const
+{
+	if (const TWeakObjectPtr<AAnt>* ProxyActor = AntProxyActors.Find(AntEntity))
+	{
+		return ProxyActor->Get();
+	}
+
+	return nullptr;
+}
+
+AFood* UGatherersMassSubsystem::GetFoodProxyActor(FMassEntityHandle FoodEntity) const
+{
+	if (const TWeakObjectPtr<AFood>* ProxyActor = FoodProxyActors.Find(FoodEntity))
+	{
+		return ProxyActor->Get();
+	}
+
+	return nullptr;
 }
 
 const FBox& UGatherersMassSubsystem::GetSimulationBounds() const

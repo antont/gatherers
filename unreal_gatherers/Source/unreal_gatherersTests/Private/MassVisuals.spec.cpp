@@ -2,21 +2,33 @@
 #include "Actors/Food.h"
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Editor.h"
+#include "FileHelpers.h"
 #include "HAL/PlatformTime.h"
 #include "MassEntitySubsystem.h"
 #include "MassEntityView.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/Optional.h"
+#include "Misc/PackageName.h"
 #include "Simulation/GatherersMassSubsystem.h"
 #include "Simulation/GatherersSpawnPlan.h"
 #include "Simulation/GatherersWorldSpawner.h"
 #include "TestLogic/GatherersWorldAssertions.h"
 #include "Tests/AutomationCommon.h"
 #include "Tests/AutomationEditorCommon.h"
+#include "unreal_gatherers/unreal_gatherersGameModeBase.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FGatherersMassVisualsAutomationTest,
 	"default.unreal_gatherers.Mass.MassInstancedVisualsCreateVisibleAntAndFoodInstances",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool LoadSimBlankIntoEditorWorld()
+{
+	const FString MapFilename = FPackageName::LongPackageNameToFilename(
+		TEXT("/Game/SimBlank/Levels/SimBlank"),
+		FPackageName::GetMapPackageExtension());
+	return FEditorFileUtils::LoadMap(MapFilename, false, false);
+}
 
 DEFINE_LATENT_AUTOMATION_COMMAND_ONE_PARAMETER(
 	FGatherersPrepareMassVisualStabilityFixtureCommand,
@@ -111,6 +123,115 @@ bool FGatherersWaitForMassVisualStabilityPIECleanupCommand::Update()
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FGatherersMassVisualStabilityAutomationTest,
 	"supplemental.unreal_gatherers.Mass.MassVisualsStayStableAcrossLiveFrames",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+class FGatherersWaitForExtendedLiveMassRunCommand : public IAutomationLatentCommand
+{
+public:
+	FGatherersWaitForExtendedLiveMassRunCommand(FAutomationTestBase* InTest, double InObservationWindowSeconds)
+		: Test(InTest),
+		  ObservationWindowSeconds(InObservationWindowSeconds)
+	{
+	}
+
+	bool Update() override
+	{
+		UWorld* World = GEditor ? GEditor->PlayWorld : nullptr;
+		if (World == nullptr)
+		{
+			if (!StartTimeSeconds.IsSet())
+			{
+				StartTimeSeconds = FPlatformTime::Seconds();
+			}
+
+			if (FPlatformTime::Seconds() - StartTimeSeconds.GetValue() >= ObservationWindowSeconds)
+			{
+				Test->TestNotNull(TEXT("extended Mass live-run world should exist"), World);
+				return true;
+			}
+
+			return false;
+		}
+
+		UGatherersMassSubsystem* MassSubsystem = World->GetSubsystem<UGatherersMassSubsystem>();
+		Test->TestNotNull(TEXT("extended Mass live-run should expose the gatherers Mass subsystem"), MassSubsystem);
+		if (MassSubsystem == nullptr)
+		{
+			return true;
+		}
+
+		if (!bConfiguredStressMode)
+		{
+			Aunreal_gatherersGameModeBase::ApplyTimeControlModeToWorld(*World, EGatherersTimeControlMode::MaxCorrect);
+			bConfiguredStressMode = true;
+		}
+
+		if (!StartTimeSeconds.IsSet())
+		{
+			StartTimeSeconds = FPlatformTime::Seconds();
+		}
+
+		const GatherersWorldAssertions::FObservedMassVisualState VisualState = GatherersWorldAssertions::ObserveMassVisuals(World);
+		Test->TestEqual(TEXT("extended Mass live-run should keep startup ant entity count"), MassSubsystem->GetManagedAntCount(), 26);
+		Test->TestEqual(TEXT("extended Mass live-run should keep startup food entity count"), MassSubsystem->GetManagedFoodCount(), 80);
+		Test->TestEqual(TEXT("extended Mass live-run should keep startup ant visual count"), VisualState.AntVisualPositions.Num(), 26);
+		Test->TestEqual(TEXT("extended Mass live-run should keep startup food visual count"), VisualState.FoodVisualPositions.Num(), 80);
+		Test->TestTrue(
+			TEXT("extended Mass live-run should keep accumulating simulated seconds"),
+			MassSubsystem->GetAccumulatedSimulationSeconds() > 0.0f);
+
+		for (const FVector& Position : VisualState.AntPositions)
+		{
+			Test->TestTrue(
+				TEXT("extended Mass live-run ant positions should stay finite"),
+				FMath::IsFinite(Position.X) && FMath::IsFinite(Position.Y) && FMath::IsFinite(Position.Z));
+		}
+
+		for (const FVector& Position : VisualState.FoodPositions)
+		{
+			Test->TestTrue(
+				TEXT("extended Mass live-run food positions should stay finite"),
+				FMath::IsFinite(Position.X) && FMath::IsFinite(Position.Y) && FMath::IsFinite(Position.Z));
+		}
+
+		return FPlatformTime::Seconds() - StartTimeSeconds.GetValue() >= ObservationWindowSeconds;
+	}
+
+private:
+	FAutomationTestBase* Test;
+	double ObservationWindowSeconds;
+	TOptional<double> StartTimeSeconds;
+	bool bConfiguredStressMode = false;
+};
+
+DEFINE_LATENT_AUTOMATION_COMMAND_THREE_PARAMETER(
+	FGatherersWaitForExtendedMassRunPIEWorldCleanupCommand,
+	FAutomationTestBase*,
+	Test,
+	double,
+	StartTimeSeconds,
+	double,
+	TimeoutSeconds);
+
+bool FGatherersWaitForExtendedMassRunPIEWorldCleanupCommand::Update()
+{
+	if (GEditor == nullptr || GEditor->PlayWorld == nullptr)
+	{
+		return true;
+	}
+
+	if (FPlatformTime::Seconds() - StartTimeSeconds < TimeoutSeconds)
+	{
+		return false;
+	}
+
+	Test->AddError(TEXT("extended-mass-live-run PIE world should be torn down before the next rerun"));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FGatherersMassManualPieCrashReproAutomationTest,
+	"manual.unreal_gatherers.Mass.SelectedViewportPieRepeatedLongRunStaysStable",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FGatherersMassVisualsAutomationTest::RunTest(const FString& Parameters)
@@ -229,5 +350,26 @@ bool FGatherersMassVisualStabilityAutomationTest::RunTest(const FString& Paramet
 	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForStableMassVisualFramesCommand(this, 5.0));
 	ADD_LATENT_AUTOMATION_COMMAND(FEndPlayMapCommand());
 	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForMassVisualStabilityPIECleanupCommand(this, FPlatformTime::Seconds(), 5.0));
+	return true;
+}
+
+bool FGatherersMassManualPieCrashReproAutomationTest::RunTest(const FString& Parameters)
+{
+	const bool bLoadedMap = LoadSimBlankIntoEditorWorld();
+	TestTrue(TEXT("should load SimBlank into the editor world"), bLoadedMap);
+
+	if (!bLoadedMap)
+	{
+		return false;
+	}
+
+	ADD_LATENT_AUTOMATION_COMMAND(FStartPIECommand(false));
+	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForExtendedLiveMassRunCommand(this, 15.0));
+	ADD_LATENT_AUTOMATION_COMMAND(FEndPlayMapCommand());
+	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForExtendedMassRunPIEWorldCleanupCommand(this, FPlatformTime::Seconds(), 20.0));
+	ADD_LATENT_AUTOMATION_COMMAND(FStartPIECommand(false));
+	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForExtendedLiveMassRunCommand(this, 15.0));
+	ADD_LATENT_AUTOMATION_COMMAND(FEndPlayMapCommand());
+	ADD_LATENT_AUTOMATION_COMMAND(FGatherersWaitForExtendedMassRunPIEWorldCleanupCommand(this, FPlatformTime::Seconds(), 20.0));
 	return true;
 }

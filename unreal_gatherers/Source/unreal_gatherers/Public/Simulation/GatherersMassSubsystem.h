@@ -39,7 +39,6 @@ struct UNREAL_GATHERERS_API FGatherersMassAntFragment : public FMassFragment
 	FVector PreviousPosition = FVector::ZeroVector;
 	FVector Direction = FVector(1.0f, 0.0f, 0.0f);
 	FMassEntityHandle CarriedFoodEntity;
-	TWeakObjectPtr<AAnt> ProxyActor = nullptr;
 	float PickupCooldownRemainingSeconds = 0.0f;
 	float MovementSpeed = 100.0f;
 	float TurnJitterRadians = PI / 2.0f;
@@ -52,26 +51,7 @@ struct UNREAL_GATHERERS_API FGatherersMassFoodFragment : public FMassFragment
 	GENERATED_BODY()
 
 	FVector Position = FVector::ZeroVector;
-	TWeakObjectPtr<AFood> ProxyActor = nullptr;
 	bool bIsLoose = true;
-};
-
-template<>
-struct TMassFragmentTraits<FGatherersMassAntFragment> final
-{
-	enum
-	{
-		AuthorAcceptsItsNotTriviallyCopyable = true
-	};
-};
-
-template<>
-struct TMassFragmentTraits<FGatherersMassFoodFragment> final
-{
-	enum
-	{
-		AuthorAcceptsItsNotTriviallyCopyable = true
-	};
 };
 
 UCLASS()
@@ -100,6 +80,8 @@ public:
 	float GetAccumulatedSimulationSeconds() const;
 	float GetSimulationRateMultiplier() const;
 	float GetFixedSimulationStepSeconds() const;
+	AAnt* GetAntProxyActor(FMassEntityHandle AntEntity) const;
+	AFood* GetFoodProxyActor(FMassEntityHandle FoodEntity) const;
 	const FBox& GetSimulationBounds() const;
 	const UInstancedStaticMeshComponent* GetAntVisualComponent() const;
 	const UInstancedStaticMeshComponent* GetFoodRepresentationComponent() const;
@@ -121,6 +103,8 @@ public:
 	float FixedSimulationStepSeconds = 1.0f / 60.0f;
 	float SimulationTimeAccumulatorSeconds = 0.0f;
 	int32 MaxSimulationStepsPerTick = 4096;
+	TMap<FMassEntityHandle, TWeakObjectPtr<AAnt>> AntProxyActors;
+	TMap<FMassEntityHandle, TWeakObjectPtr<AFood>> FoodProxyActors;
 
 private:
 	FMassRuntimePipeline SimulationProcessorPipeline;

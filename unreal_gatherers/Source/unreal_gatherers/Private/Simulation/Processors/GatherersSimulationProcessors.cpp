@@ -157,7 +157,7 @@ void UGatherersFoodInteractionProcessor::Execute(FMassEntityManager& EntityManag
 					CarriedFoodFragment.bIsLoose = true;
 					CarriedFoodFragment.Position = AntFragment.Position;
 
-					if (AFood* CarriedFoodProxy = CarriedFoodFragment.ProxyActor.Get())
+					if (AFood* CarriedFoodProxy = MassSubsystem.GetFoodProxyActor(AntFragment.CarriedFoodEntity))
 					{
 						CarriedFoodProxy->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
 						CarriedFoodProxy->SetActorLocation(AntFragment.Position);
