@@ -8,6 +8,7 @@
 #include "TestLogic/GatherersWorldAssertions.h"
 #include "Tests/AutomationCommon.h"
 #include "Tests/AutomationEditorCommon.h"
+#include "unreal_gatherers/unreal_gatherersGameModeBase.h"
 
 DEFINE_LATENT_AUTOMATION_COMMAND_THREE_PARAMETER(
 	FGatherersWaitForStartupActorsCommand,
@@ -38,7 +39,9 @@ bool FGatherersWaitForStartupActorsCommand::Update()
 
 	const GatherersWorldAssertions::FObservedMassVisualState VisualState = GatherersWorldAssertions::ObserveMassVisuals(World);
 	UGatherersMassSubsystem* MassSubsystem = World->GetSubsystem<UGatherersMassSubsystem>();
+	Aunreal_gatherersGameModeBase* GameMode = World->GetAuthGameMode<Aunreal_gatherersGameModeBase>();
 	Test->TestNotNull(TEXT("startup world should expose the gatherers Mass subsystem"), MassSubsystem);
+	Test->TestNotNull(TEXT("startup world should use the gatherers game mode"), GameMode);
 	const GatherersWorldAssertions::FObservedWorldState ActorState = GatherersWorldAssertions::Observe(World);
 	if (VisualState.AntPositions.Num() != 26 || VisualState.FoodPositions.Num() != 80)
 	{
@@ -58,6 +61,17 @@ bool FGatherersWaitForStartupActorsCommand::Update()
 	{
 		Test->TestEqual(TEXT("startup managed ant count"), MassSubsystem->GetManagedAntCount(), 26);
 		Test->TestEqual(TEXT("startup managed food count"), MassSubsystem->GetManagedFoodCount(), 80);
+	}
+	if (GameMode != nullptr)
+	{
+		Test->TestEqual(
+			TEXT("startup active time mode should match the configured startup mode"),
+			GameMode->GetTimeControlMode(),
+			GameMode->GetStartupTimeControlMode());
+		Test->TestEqual(
+			TEXT("startup world time dilation should match the startup mode"),
+			World->GetWorldSettings()->GetEffectiveTimeDilation(),
+			Aunreal_gatherersGameModeBase::GetTimeDilationForMode(GameMode->GetStartupTimeControlMode()));
 	}
 	return true;
 }
