@@ -107,8 +107,12 @@ public:
 	TMap<FMassEntityHandle, TWeakObjectPtr<AFood>> FoodProxyActors;
 
 private:
+	UPROPERTY(Transient)
 	FMassRuntimePipeline SimulationProcessorPipeline;
+
+	UPROPERTY(Transient)
 	FMassRuntimePipeline VisualProcessorPipeline;
+
 	bool bProcessorPipelinesInitialized = false;
 
 	UPROPERTY(Transient)
