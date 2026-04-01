@@ -314,10 +314,7 @@ TArray<FMassEntityHandle> UGatherersMassSubsystem::QueryLooseFoodEntitiesAlongSw
 				CandidateInstanceIndices.Add(Hit.Item);
 			}
 		}
-	}
 
-	if (bAnySweepHits && CandidateInstanceIndices.IsEmpty())
-	{
 		FBox SweptBounds(ForceInit);
 		SweptBounds += SweepStart;
 		SweptBounds += SweepEnd;
@@ -335,6 +332,8 @@ TArray<FMassEntityHandle> UGatherersMassSubsystem::QueryLooseFoodEntitiesAlongSw
 	{
 		FMassEntityHandle Entity;
 		int32 InstanceIndex = INDEX_NONE;
+		bool bStartsOverlapped = false;
+		float StartDistanceSquared = TNumericLimits<float>::Max();
 		float DistanceAlongPathSquared = TNumericLimits<float>::Max();
 	};
 
@@ -355,6 +354,7 @@ TArray<FMassEntityHandle> UGatherersMassSubsystem::QueryLooseFoodEntitiesAlongSw
 			continue;
 		}
 
+		const float StartDistanceSquared = FVector::DistSquared(SweepStart, FoodFragment.Position);
 		const FVector ClosestPoint = FMath::ClosestPointOnSegment(FoodFragment.Position, SweepStart, SweepEnd);
 		if (FVector::DistSquared(ClosestPoint, FoodFragment.Position) > FMath::Square(QueryRadius))
 		{
@@ -364,12 +364,24 @@ TArray<FMassEntityHandle> UGatherersMassSubsystem::QueryLooseFoodEntitiesAlongSw
 		Hits.Add({
 			FoodEntity,
 			InstanceIndex,
+			StartDistanceSquared <= FMath::Square(QueryRadius),
+			StartDistanceSquared,
 			FVector::DistSquared(SweepStart, ClosestPoint),
 		});
 	}
 
 	Hits.Sort([](const FSweptLooseFoodHit& A, const FSweptLooseFoodHit& B)
 	{
+		if (A.bStartsOverlapped != B.bStartsOverlapped)
+		{
+			return A.bStartsOverlapped;
+		}
+
+		if (A.bStartsOverlapped && B.bStartsOverlapped)
+		{
+			return A.InstanceIndex < B.InstanceIndex;
+		}
+
 		if (!FMath::IsNearlyEqual(A.DistanceAlongPathSquared, B.DistanceAlongPathSquared))
 		{
 			return A.DistanceAlongPathSquared < B.DistanceAlongPathSquared;
