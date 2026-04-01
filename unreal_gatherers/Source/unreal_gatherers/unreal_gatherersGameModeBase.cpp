@@ -15,7 +15,8 @@ namespace
 {
 const FBox DefaultGamePlayAreaBounds(FVector(-1280.0f, -720.0f, -100.0f), FVector(1280.0f, 720.0f, 100.0f));
 constexpr float GatherersFastTimeDilation = 4.0f;
-constexpr float GatherersMaxCorrectTimeDilation = 27.0f;
+constexpr float GatherersVeryFastTimeDilation = 27.0f;
+constexpr float GatherersMaxTimeDilation = 200.0f;
 }
 
 Aunreal_gatherersGameModeBase::Aunreal_gatherersGameModeBase()
@@ -82,9 +83,12 @@ EGatherersTimeControlMode Aunreal_gatherersGameModeBase::GetNextTimeControlMode(
 		return EGatherersTimeControlMode::Fast;
 
 	case EGatherersTimeControlMode::Fast:
-		return EGatherersTimeControlMode::MaxCorrect;
+		return EGatherersTimeControlMode::VeryFast;
 
-	case EGatherersTimeControlMode::MaxCorrect:
+	case EGatherersTimeControlMode::VeryFast:
+		return EGatherersTimeControlMode::Max;
+
+	case EGatherersTimeControlMode::Max:
 	default:
 		return EGatherersTimeControlMode::Normal;
 	}
@@ -115,8 +119,11 @@ float Aunreal_gatherersGameModeBase::GetSimulationRateForMode(EGatherersTimeCont
 {
 	switch (Mode)
 	{
-	case EGatherersTimeControlMode::MaxCorrect:
-		return GatherersMaxCorrectTimeDilation;
+	case EGatherersTimeControlMode::Max:
+		return GatherersMaxTimeDilation;
+
+	case EGatherersTimeControlMode::VeryFast:
+		return GatherersVeryFastTimeDilation;
 
 	case EGatherersTimeControlMode::Fast:
 		return GatherersFastTimeDilation;

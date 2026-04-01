@@ -162,7 +162,7 @@ public:
 
 		if (!bConfiguredStressMode)
 		{
-			Aunreal_gatherersGameModeBase::ApplyTimeControlModeToWorld(*World, EGatherersTimeControlMode::MaxCorrect);
+			Aunreal_gatherersGameModeBase::ApplyTimeControlModeToWorld(*World, EGatherersTimeControlMode::Max);
 			bConfiguredStressMode = true;
 		}
 

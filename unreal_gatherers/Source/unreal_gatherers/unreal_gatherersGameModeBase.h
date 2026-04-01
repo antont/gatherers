@@ -13,7 +13,8 @@ enum class EGatherersTimeControlMode : uint8
 {
 	Normal,
 	Fast,
-	MaxCorrect,
+	VeryFast,
+	Max,
 };
 
 UCLASS()

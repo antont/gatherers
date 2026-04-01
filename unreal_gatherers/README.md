@@ -62,7 +62,7 @@ Useful targeted reruns:
 -ExecCmds="Automation RunTest default.unreal_gatherers.FullSimulationActorFixture;Quit"
 -ExecCmds="Automation RunTest default.unreal_gatherers.Mass;Quit"
 -ExecCmds="Automation RunTest supplemental.unreal_gatherers.Spawning.StartupSmokeSpawnsRustLikeFullSimulationCounts;Quit"
--ExecCmds="Automation RunTest supplemental.unreal_gatherers.TimeControl.MaxCorrectSpeedSweepReportsHighestPassingDilation;Quit"
+-ExecCmds="Automation RunTest supplemental.unreal_gatherers.TimeControl.VeryFastSpeedSweepReportsHighestPassingDilation;Quit"
 -ExecCmds="Automation RunTest supplemental.unreal_gatherers.Mass.MassVisualsStayStableAcrossLiveFrames;Quit"
 ```
 
@@ -74,7 +74,7 @@ Run the supplemental machine-local sweep with:
 ./scripts/measure_unreal_max_speed.sh
 ```
 
-This targets `supplemental.unreal_gatherers.TimeControl.MaxCorrectSpeedSweepReportsHighestPassingDilation`.
+This targets `supplemental.unreal_gatherers.TimeControl.VeryFastSpeedSweepReportsHighestPassingDilation`.
 The automation log prints each tested dilation and a final summary line such as:
 
 ```text

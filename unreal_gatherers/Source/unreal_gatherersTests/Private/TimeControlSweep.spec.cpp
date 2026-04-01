@@ -296,7 +296,7 @@ bool FGatherersWaitForSweepPIECleanupCommand::Update()
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FGatherersTimeControlSweepAutomationTest,
-	"supplemental.unreal_gatherers.TimeControl.MaxCorrectSpeedSweepReportsHighestPassingDilation",
+	"supplemental.unreal_gatherers.TimeControl.VeryFastSpeedSweepReportsHighestPassingDilation",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FGatherersTimeControlSweepAutomationTest::RunTest(const FString& Parameters)

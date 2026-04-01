@@ -346,29 +346,44 @@ public:
 			FString(TEXT("Fast")));
 
 		Test->TestTrue(
-			TEXT("max-correct mode should use a higher simulation rate than the existing fast mode"),
-			Aunreal_gatherersGameModeBase::GetSimulationRateForMode(EGatherersTimeControlMode::MaxCorrect)
+			TEXT("very-fast mode should use a higher simulation rate than the existing fast mode"),
+			Aunreal_gatherersGameModeBase::GetSimulationRateForMode(EGatherersTimeControlMode::VeryFast)
 				> Aunreal_gatherersGameModeBase::GetSimulationRateForMode(EGatherersTimeControlMode::Fast));
 
 		Widget->TriggerToggleFromUI();
 
 		Test->TestEqual(
-			TEXT("a second UI toggle should switch the world time mode to max-correct"),
+			TEXT("a second UI toggle should switch the world time mode to very-fast"),
 			GameMode->GetTimeControlMode(),
-			EGatherersTimeControlMode::MaxCorrect);
+			EGatherersTimeControlMode::VeryFast);
 		Test->TestEqual(
-			TEXT("max-correct mode should also leave world dilation at 1x because the simulation clock owns speed"),
+			TEXT("very-fast mode should also leave world dilation at 1x because the simulation clock owns speed"),
 			World->GetWorldSettings()->GetEffectiveTimeDilation(),
 			1.0f);
 		Test->TestEqual(
-			TEXT("time-control widget should show the measured max-correct dilation"),
+			TEXT("time-control widget should show the very-fast dilation"),
 			Widget->GetCurrentModeLabel(),
-			FString(TEXT("Max Correct (27x)")));
+			FString(TEXT("Very Fast (27x)")));
 
 		Widget->TriggerToggleFromUI();
 
 		Test->TestEqual(
-			TEXT("a third UI toggle should cycle the world time mode back to normal"),
+			TEXT("a third UI toggle should switch the world time mode to max"),
+			GameMode->GetTimeControlMode(),
+			EGatherersTimeControlMode::Max);
+		Test->TestEqual(
+			TEXT("max mode should also leave world dilation at 1x because the simulation clock owns speed"),
+			World->GetWorldSettings()->GetEffectiveTimeDilation(),
+			1.0f);
+		Test->TestEqual(
+			TEXT("time-control widget should show the max dilation"),
+			Widget->GetCurrentModeLabel(),
+			FString(TEXT("Max (200x)")));
+
+		Widget->TriggerToggleFromUI();
+
+		Test->TestEqual(
+			TEXT("a fourth UI toggle should cycle the world time mode back to normal"),
 			GameMode->GetTimeControlMode(),
 			EGatherersTimeControlMode::Normal);
 		Test->TestEqual(
