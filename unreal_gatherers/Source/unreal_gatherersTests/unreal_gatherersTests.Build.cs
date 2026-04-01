@@ -16,6 +16,7 @@ public class unreal_gatherersTests : ModuleRules
 			"MassActors",
 			"MassSimulation",
 			"MassRepresentation",
+			"UMG",
 			"UnrealEd",
 			"unreal_gatherers",
 		});

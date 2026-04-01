@@ -19,9 +19,14 @@ public class unreal_gatherers : ModuleRules
 			"MassActors",
 			"MassSimulation",
 			"MassRepresentation",
+			"UMG",
 		});
 
-		PrivateDependencyModuleNames.AddRange(new string[] {  });
+		PrivateDependencyModuleNames.AddRange(new string[]
+		{
+			"Slate",
+			"SlateCore",
+		});
 
 		// Uncomment if you are using Slate UI
 		// PrivateDependencyModuleNames.AddRange(new string[] { "Slate", "SlateCore" });

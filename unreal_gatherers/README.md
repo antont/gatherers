@@ -62,7 +62,29 @@ Useful targeted reruns:
 -ExecCmds="Automation RunTest default.unreal_gatherers.FullSimulationActorFixture;Quit"
 -ExecCmds="Automation RunTest default.unreal_gatherers.Mass;Quit"
 -ExecCmds="Automation RunTest supplemental.unreal_gatherers.Spawning.StartupSmokeSpawnsRustLikeFullSimulationCounts;Quit"
+-ExecCmds="Automation RunTest supplemental.unreal_gatherers.TimeControl.MaxCorrectSpeedSweepReportsHighestPassingDilation;Quit"
 -ExecCmds="Automation RunTest supplemental.unreal_gatherers.Mass.MassVisualsStayStableAcrossLiveFrames;Quit"
+```
+
+## Measure max correct speed
+
+Run the supplemental machine-local sweep with:
+
+```sh
+./scripts/measure_unreal_max_speed.sh
+```
+
+This targets `supplemental.unreal_gatherers.TimeControl.MaxCorrectSpeedSweepReportsHighestPassingDilation`.
+The automation log prints each tested dilation and a final summary line such as:
+
+```text
+time-dilation sweep highest passing dilation: 27x
+```
+
+If you want to skip rebuilding the editor target for a rerun:
+
+```sh
+./scripts/measure_unreal_max_speed.sh --no-build
 ```
 
 ## Run the visual gather demos

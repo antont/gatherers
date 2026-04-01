@@ -69,6 +69,7 @@ public:
 	int32 GetManagedAntCount() const;
 	int32 GetManagedFoodCount() const;
 	bool HasManagedSimulation() const;
+	float GetAccumulatedSimulationSeconds() const;
 	const FBox& GetSimulationBounds() const;
 	const UInstancedStaticMeshComponent* GetAntVisualComponent() const;
 	const UInstancedStaticMeshComponent* GetFoodRepresentationComponent() const;
@@ -83,6 +84,7 @@ public:
 	TArray<FMassEntityHandle> ManagedAntEntities;
 	TArray<FMassEntityHandle> ManagedFoodEntities;
 	FBox SimulationBounds = FBox(EForceInit::ForceInit);
+	float AccumulatedSimulationSeconds = 0.0f;
 
 private:
 	UPROPERTY(Transient)

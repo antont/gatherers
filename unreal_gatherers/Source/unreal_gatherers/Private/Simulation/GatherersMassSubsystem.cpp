@@ -143,10 +143,14 @@ bool UGatherersMassSubsystem::EnsureVisualComponents()
 
 	if (!VisualizerActor)
 	{
-		FActorSpawnParameters SpawnParameters;
-		SpawnParameters.Name = VisualizerActorName;
-		SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-		VisualizerActor = World->SpawnActor<AActor>(AActor::StaticClass(), FTransform::Identity, SpawnParameters);
+		VisualizerActor = FindObject<AActor>(World->PersistentLevel, VisualizerActorName);
+		if (!VisualizerActor)
+		{
+			FActorSpawnParameters SpawnParameters;
+			SpawnParameters.Name = VisualizerActorName;
+			SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+			VisualizerActor = World->SpawnActor<AActor>(AActor::StaticClass(), FTransform::Identity, SpawnParameters);
+		}
 	}
 
 	if (VisualizerActor == nullptr)
@@ -516,6 +520,8 @@ void UGatherersMassSubsystem::Tick(float DeltaTime)
 		return;
 	}
 
+	AccumulatedSimulationSeconds += DeltaTime;
+
 	FMassEntityManager& EntityManager = MassEntitySubsystem->GetMutableEntityManager();
 	for (const FMassEntityHandle Entity : ManagedAntEntities)
 	{
@@ -706,6 +712,13 @@ void UGatherersMassSubsystem::ResetSimulation()
 	{
 		FoodRepresentationComponent->ClearInstances();
 	}
+	if (VisualizerActor != nullptr)
+	{
+		VisualizerActor->Destroy();
+		VisualizerActor = nullptr;
+		AntVisualComponent = nullptr;
+		FoodRepresentationComponent = nullptr;
+	}
 
 	for (const FMassEntityHandle Entity : ManagedAntEntities)
 	{
@@ -726,6 +739,7 @@ void UGatherersMassSubsystem::ResetSimulation()
 	ManagedAntEntities.Reset();
 	ManagedFoodEntities.Reset();
 	SimulationBounds = FBox(EForceInit::ForceInit);
+	AccumulatedSimulationSeconds = 0.0f;
 }
 
 int32 UGatherersMassSubsystem::GetManagedAntCount() const
@@ -741,6 +755,11 @@ int32 UGatherersMassSubsystem::GetManagedFoodCount() const
 bool UGatherersMassSubsystem::HasManagedSimulation() const
 {
 	return ManagedAntEntities.Num() > 0 || ManagedFoodEntities.Num() > 0;
+}
+
+float UGatherersMassSubsystem::GetAccumulatedSimulationSeconds() const
+{
+	return AccumulatedSimulationSeconds;
 }
 
 const FBox& UGatherersMassSubsystem::GetSimulationBounds() const
