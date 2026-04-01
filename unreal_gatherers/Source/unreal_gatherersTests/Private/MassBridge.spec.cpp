@@ -194,11 +194,11 @@ bool FGatherersMassRepresentationBridgeAutomationTest::RunTest(const FString& Pa
 		TEXT("Mass food path should expose a dedicated food instanced visual component"),
 		const_cast<UInstancedStaticMeshComponent*>(MassSubsystem->GetFoodRepresentationComponent()));
 
-	MassSubsystem->Tick(0.1f);
+	MassSubsystem->RunSimulationProcessorsForTesting(0.1f);
 
 	const FGatherersMassAntFragment& AntFragment = AntView.GetFragmentData<FGatherersMassAntFragment>();
 	TestTrue(
-		TEXT("Mass ant can still advance without spawned actor proxies"),
+		TEXT("Mass ant can still advance through the processor-driven path without spawned actor proxies"),
 		AntFragment.Position.Equals(FVector(10.0f, 0.0f, 0.0f), 1.0f));
 
 	MassSubsystem->ResetSimulation();

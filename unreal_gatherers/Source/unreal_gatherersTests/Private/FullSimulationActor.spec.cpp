@@ -63,7 +63,7 @@ bool FGatherersFullSimulationIgnoresOffPathFoodAutomationTest::RunTest(const FSt
 
 	for (int32 StepIndex = 0; StepIndex < 5; ++StepIndex)
 	{
-		MassSubsystem->Tick(0.1f);
+		MassSubsystem->RunSimulationProcessorsForTesting(0.1f);
 	}
 
 	UMassEntitySubsystem* MassEntitySubsystem = World->GetSubsystem<UMassEntitySubsystem>();
@@ -77,7 +77,7 @@ bool FGatherersFullSimulationIgnoresOffPathFoodAutomationTest::RunTest(const FSt
 	FMassEntityView AntView(EntityManager, MassSubsystem->ManagedAntEntities[0]);
 	const FGatherersMassAntFragment& AntFragment = AntView.GetFragmentData<FGatherersMassAntFragment>();
 	TestTrue(
-		TEXT("full-sim ant keeps moving forward instead of steering toward off-path food"),
+		TEXT("full-sim ant keeps moving forward through the processor-driven path instead of steering toward off-path food"),
 		AntFragment.Position.Equals(FVector(50.0f, 0.0f, 0.0f), 1.0f));
 
 	MassSubsystem->ResetSimulation();

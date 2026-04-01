@@ -5,22 +5,22 @@
 #include "Components/SceneComponent.h"
 #include "Engine/StaticMesh.h"
 #include "GameFramework/Actor.h"
-#include "Math/RandomStream.h"
+#include "MassExecutor.h"
 #include "MassEntityManager.h"
+#include "MassProcessingContext.h"
 #include "MassEntitySubsystem.h"
 #include "MassEntityView.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
 #include "StructUtils/InstancedStruct.h"
 #include "Simulation/GatherersAntSimulation.h"
+#include "Simulation/GatherersMassRuntime.h"
+#include "Simulation/Processors/GatherersSimulationProcessors.h"
 #include "Simulation/GatherersSpawnPlan.h"
 #include "Simulation/GatherersWorldSpawner.h"
 
 namespace
 {
-constexpr float MassPickupRadius = 15.0f;
-constexpr float MassCarriedFoodHeight = 20.0f;
-constexpr float MassPickupSeparationDistance = 50.0f;
 const FLinearColor MassAntColor(0.8f, 0.8f, 0.8f, 1.0f);
 const FLinearColor MassFoodColor(192.0f / 255.0f, 2.0f / 255.0f, 2.0f / 255.0f, 1.0f);
 const FVector MassAntVisualScale(0.2f, 0.2f, 0.2f);
@@ -32,17 +32,6 @@ constexpr TCHAR VisualizerRootName[] = TEXT("Root");
 constexpr TCHAR AntInstancesName[] = TEXT("AntInstances");
 constexpr TCHAR FoodInstancesName[] = TEXT("FoodInstances");
 constexpr ECollisionChannel FoodQueryChannel = ECC_GameTraceChannel1;
-
-FVector ConsumeAntTurnDirection(FGatherersMassAntFragment& AntFragment)
-{
-	FRandomStream RandomStream(AntFragment.RandomSeed);
-	const FVector TurnDirection = ComputeAntTurnDirection(
-		AntFragment.Direction,
-		RandomStream.FRandRange(-1.0f, 1.0f),
-		AntFragment.TurnJitterRadians);
-	AntFragment.RandomSeed = RandomStream.GetCurrentSeed();
-	return TurnDirection;
-}
 
 void ConfigureVisualComponent(
 	UInstancedStaticMeshComponent& Component,
@@ -91,12 +80,112 @@ FVector ComputeFoodVisualPosition(
 		const FGatherersMassAntFragment& AntFragment = AntView.GetFragmentData<FGatherersMassAntFragment>();
 		if (AntFragment.CarriedFoodEntity == FoodEntity)
 		{
-			return AntFragment.Position + ComputeCarriedFoodRelativeLocation(MassCarriedFoodHeight);
+			return AntFragment.Position + ComputeCarriedFoodRelativeLocation(GatherersMassCarriedFoodHeight);
 		}
 	}
 
 	return FoodFragment.Position;
 }
+}
+
+void UGatherersMassSubsystem::Initialize(FSubsystemCollectionBase& Collection)
+{
+	Super::Initialize(Collection);
+	bProcessorPipelinesInitialized = false;
+}
+
+void UGatherersMassSubsystem::Deinitialize()
+{
+	SimulationProcessorPipeline.Reset();
+	VisualProcessorPipeline.Reset();
+	bProcessorPipelinesInitialized = false;
+	Super::Deinitialize();
+}
+
+bool UGatherersMassSubsystem::EnsureProcessorPipelines(UMassEntitySubsystem& MassEntitySubsystem)
+{
+	if (bProcessorPipelinesInitialized)
+	{
+		return true;
+	}
+
+	FMassEntityManager& EntityManager = MassEntitySubsystem.GetMutableEntityManager();
+	const TArray<TSubclassOf<UMassProcessor>> SimulationProcessors = {
+		UGatherersTimeAccumulationProcessor::StaticClass(),
+		UGatherersAntMovementProcessor::StaticClass(),
+		UGatherersFoodInteractionProcessor::StaticClass(),
+	};
+	SimulationProcessorPipeline.InitializeFromClassArray(SimulationProcessors, *this, EntityManager.AsShared());
+
+	const TArray<TSubclassOf<UMassProcessor>> VisualProcessors = {
+		UGatherersVisualSyncProcessor::StaticClass(),
+	};
+	VisualProcessorPipeline.InitializeFromClassArray(VisualProcessors, *this, EntityManager.AsShared());
+
+	bProcessorPipelinesInitialized = true;
+	return true;
+}
+
+void UGatherersMassSubsystem::RunProcessorPipelines(float DeltaTime, bool bIncludeVisualSync)
+{
+	if (!HasManagedSimulation())
+	{
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (World == nullptr)
+	{
+		return;
+	}
+
+	UMassEntitySubsystem* MassEntitySubsystem = World->GetSubsystem<UMassEntitySubsystem>();
+	if (MassEntitySubsystem == nullptr || !EnsureProcessorPipelines(*MassEntitySubsystem))
+	{
+		return;
+	}
+
+	FMassEntityManager& EntityManager = MassEntitySubsystem->GetMutableEntityManager();
+	FMassProcessingContext SimulationContext(EntityManager, DeltaTime);
+	UE::Mass::Executor::Run(SimulationProcessorPipeline, SimulationContext);
+
+	if (bIncludeVisualSync)
+	{
+		FMassProcessingContext VisualContext(EntityManager, DeltaTime);
+		UE::Mass::Executor::Run(VisualProcessorPipeline, VisualContext);
+	}
+}
+
+void UGatherersMassSubsystem::RunSimulationProcessorsForTesting(float DeltaTime)
+{
+	RunProcessorPipelines(DeltaTime, false);
+}
+
+void UGatherersMassSubsystem::AdvanceAccumulatedSimulationSeconds(float DeltaTime)
+{
+	AccumulatedSimulationSeconds += FMath::Max(0.0f, DeltaTime);
+}
+
+void UGatherersMassSubsystem::SyncManagedVisuals()
+{
+	if (!HasManagedSimulation())
+	{
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (World == nullptr)
+	{
+		return;
+	}
+
+	UMassEntitySubsystem* MassEntitySubsystem = World->GetSubsystem<UMassEntitySubsystem>();
+	if (MassEntitySubsystem == nullptr)
+	{
+		return;
+	}
+
+	SyncVisualInstances(*MassEntitySubsystem);
 }
 
 bool UGatherersMassSubsystem::EnsureVisualComponents()
@@ -502,127 +591,7 @@ void UGatherersMassSubsystem::SyncVisualInstances(UMassEntitySubsystem& MassEnti
 void UGatherersMassSubsystem::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
-
-	if (!HasManagedSimulation())
-	{
-		return;
-	}
-
-	UWorld* World = GetWorld();
-	if (World == nullptr)
-	{
-		return;
-	}
-
-	UMassEntitySubsystem* MassEntitySubsystem = World->GetSubsystem<UMassEntitySubsystem>();
-	if (MassEntitySubsystem == nullptr)
-	{
-		return;
-	}
-
-	AccumulatedSimulationSeconds += DeltaTime;
-
-	FMassEntityManager& EntityManager = MassEntitySubsystem->GetMutableEntityManager();
-	for (const FMassEntityHandle Entity : ManagedAntEntities)
-	{
-		if (!EntityManager.IsEntityValid(Entity))
-		{
-			continue;
-		}
-
-		FMassEntityView AntView(EntityManager, Entity);
-		FGatherersMassAntFragment& AntFragment = AntView.GetFragmentData<FGatherersMassAntFragment>();
-		AntFragment.PickupCooldownRemainingSeconds = ComputeRemainingPickupCooldown(
-			AntFragment.PickupCooldownRemainingSeconds,
-			DeltaTime);
-		const FVector PreviousPosition = AntFragment.Position;
-		AntFragment.Position = ComputeAntHeadingMovementStep(
-			AntFragment.Position,
-			AntFragment.Direction,
-			AntFragment.MovementSpeed,
-			18.0f,
-			DeltaTime);
-
-		if (SimulationBounds.IsValid)
-		{
-			FVector InwardBoundaryNormal = FVector::ZeroVector;
-			if (AntFragment.Position.X < SimulationBounds.Min.X)
-			{
-				AntFragment.Position.X = SimulationBounds.Min.X;
-				InwardBoundaryNormal += FVector(1.0f, 0.0f, 0.0f);
-			}
-			else if (AntFragment.Position.X > SimulationBounds.Max.X)
-			{
-				AntFragment.Position.X = SimulationBounds.Max.X;
-				InwardBoundaryNormal += FVector(-1.0f, 0.0f, 0.0f);
-			}
-
-			if (AntFragment.Position.Y < SimulationBounds.Min.Y)
-			{
-				AntFragment.Position.Y = SimulationBounds.Min.Y;
-				InwardBoundaryNormal += FVector(0.0f, 1.0f, 0.0f);
-			}
-			else if (AntFragment.Position.Y > SimulationBounds.Max.Y)
-			{
-				AntFragment.Position.Y = SimulationBounds.Max.Y;
-				InwardBoundaryNormal += FVector(0.0f, -1.0f, 0.0f);
-			}
-
-			if (!InwardBoundaryNormal.IsNearlyZero())
-			{
-				AntFragment.Direction = ComputeBoundaryTurnBackDirection(AntFragment.Direction, InwardBoundaryNormal);
-			}
-		}
-
-		const TArray<FMassEntityHandle> NearbyFoodEntities = QueryLooseFoodEntitiesAlongSweep(
-			PreviousPosition,
-			AntFragment.Position,
-			MassPickupRadius);
-		const FMassEntityHandle NearbyFoodEntity = NearbyFoodEntities.IsEmpty()
-			? FMassEntityHandle()
-			: NearbyFoodEntities[0];
-		FGatherersMassFoodFragment* NearbyFood = nullptr;
-		if (NearbyFoodEntity.IsSet() && EntityManager.IsEntityValid(NearbyFoodEntity))
-		{
-			FMassEntityView NearbyFoodView(EntityManager, NearbyFoodEntity);
-			NearbyFood = &NearbyFoodView.GetFragmentData<FGatherersMassFoodFragment>();
-		}
-
-		if (AntFragment.CarriedFoodEntity.IsValid() && NearbyFood != nullptr)
-		{
-			AntFragment.Direction = ConsumeAntTurnDirection(AntFragment);
-
-			if (EntityManager.IsEntityValid(AntFragment.CarriedFoodEntity))
-			{
-				FMassEntityView CarriedFoodView(EntityManager, AntFragment.CarriedFoodEntity);
-				FGatherersMassFoodFragment& CarriedFoodFragment = CarriedFoodView.GetFragmentData<FGatherersMassFoodFragment>();
-				CarriedFoodFragment.bIsLoose = true;
-				CarriedFoodFragment.Position = AntFragment.Position;
-
-				if (AFood* CarriedFoodProxy = CarriedFoodFragment.ProxyActor.Get())
-				{
-					CarriedFoodProxy->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
-					CarriedFoodProxy->SetActorLocation(AntFragment.Position);
-				}
-			}
-
-			AntFragment.CarriedFoodEntity.Reset();
-			AntFragment.PickupCooldownRemainingSeconds = ComputePickupCooldownForSeparationDistance(
-				MassPickupSeparationDistance,
-				AntFragment.MovementSpeed);
-		}
-		else if (!AntFragment.CarriedFoodEntity.IsValid() && AntFragment.PickupCooldownRemainingSeconds <= 0.0f)
-		{
-			if (NearbyFood != nullptr)
-			{
-				AntFragment.Direction = ConsumeAntTurnDirection(AntFragment);
-				AntFragment.CarriedFoodEntity = NearbyFoodEntity;
-				NearbyFood->bIsLoose = false;
-			}
-		}
-	}
-
-	SyncVisualInstances(*MassEntitySubsystem);
+	RunProcessorPipelines(DeltaTime, true);
 }
 
 TStatId UGatherersMassSubsystem::GetStatId() const
@@ -657,13 +626,16 @@ void UGatherersMassSubsystem::InitializeHybridSimulation(const FGatherersSpawnRe
 
 		TArray<FInstancedStruct, TInlineAllocator<1>> FoodFragments;
 		FoodFragments.Add(FInstancedStruct::Make(FoodFragment));
-		ManagedFoodEntities.Add(EntityManager.CreateEntity(FoodFragments));
+		const FMassEntityHandle FoodEntity = EntityManager.CreateEntity(FoodFragments);
+		EntityManager.AddTagToEntity(FoodEntity, FGatherersMassFoodTag::StaticStruct());
+		ManagedFoodEntities.Add(FoodEntity);
 	}
 
 	for (int32 AntIndex = 0; AntIndex < Plan.AntSpawns.Num(); ++AntIndex)
 	{
 		FGatherersMassAntFragment AntFragment;
 		AntFragment.Position = Plan.AntSpawns[AntIndex].GetLocation();
+		AntFragment.PreviousPosition = AntFragment.Position;
 		AntFragment.Direction = Plan.AntInitialDirections.IsValidIndex(AntIndex)
 			? Plan.AntInitialDirections[AntIndex].GetSafeNormal()
 			: FVector(1.0f, 0.0f, 0.0f);
@@ -679,7 +651,9 @@ void UGatherersMassSubsystem::InitializeHybridSimulation(const FGatherersSpawnRe
 
 		TArray<FInstancedStruct, TInlineAllocator<1>> AntFragments;
 		AntFragments.Add(FInstancedStruct::Make(AntFragment));
-		ManagedAntEntities.Add(EntityManager.CreateEntity(AntFragments));
+		const FMassEntityHandle AntEntity = EntityManager.CreateEntity(AntFragments);
+		EntityManager.AddTagToEntity(AntEntity, FGatherersMassAntTag::StaticStruct());
+		ManagedAntEntities.Add(AntEntity);
 	}
 
 	RebuildVisualInstances(*MassEntitySubsystem);
@@ -740,6 +714,9 @@ void UGatherersMassSubsystem::ResetSimulation()
 	ManagedFoodEntities.Reset();
 	SimulationBounds = FBox(EForceInit::ForceInit);
 	AccumulatedSimulationSeconds = 0.0f;
+	SimulationProcessorPipeline.Reset();
+	VisualProcessorPipeline.Reset();
+	bProcessorPipelinesInitialized = false;
 }
 
 int32 UGatherersMassSubsystem::GetManagedAntCount() const
