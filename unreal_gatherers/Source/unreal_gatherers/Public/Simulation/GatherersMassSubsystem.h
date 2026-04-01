@@ -79,7 +79,6 @@ public:
 	bool HasManagedSimulation() const;
 	float GetAccumulatedSimulationSeconds() const;
 	float GetSimulationRateMultiplier() const;
-	float GetFixedSimulationStepSeconds() const;
 	AAnt* GetAntProxyActor(FMassEntityHandle AntEntity) const;
 	AFood* GetFoodProxyActor(FMassEntityHandle FoodEntity) const;
 	const FBox& GetSimulationBounds() const;
@@ -100,7 +99,6 @@ public:
 	FBox SimulationBounds = FBox(EForceInit::ForceInit);
 	float AccumulatedSimulationSeconds = 0.0f;
 	float SimulationRateMultiplier = 1.0f;
-	float FixedSimulationStepSeconds = 1.0f / 60.0f;
 	float SimulationTimeAccumulatorSeconds = 0.0f;
 	int32 MaxSimulationStepsPerTick = 4096;
 	TMap<FMassEntityHandle, TWeakObjectPtr<AAnt>> AntProxyActors;

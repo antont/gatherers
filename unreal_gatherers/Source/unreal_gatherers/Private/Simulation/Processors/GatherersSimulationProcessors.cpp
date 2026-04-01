@@ -51,7 +51,12 @@ void UGatherersAntMovementProcessor::Execute(FMassEntityManager& EntityManager, 
 	const FBox SimulationBounds = Context.GetSubsystemChecked<UGatherersMassSubsystem>().GetSimulationBounds();
 	const float DeltaSeconds = Context.GetDeltaTimeSeconds();
 
-	EntityQuery.ForEachEntityChunk(Context, [SimulationBounds, DeltaSeconds](FMassExecutionContext& ChunkContext)
+	const FVector BoundsSize = SimulationBounds.GetSize();
+	const float BoundsMaxStepDistance = SimulationBounds.IsValid
+		? 0.5f * FMath::Min(BoundsSize.X, BoundsSize.Y)
+		: TNumericLimits<float>::Max();
+
+	EntityQuery.ForEachEntityChunk(Context, [SimulationBounds, DeltaSeconds, BoundsMaxStepDistance](FMassExecutionContext& ChunkContext)
 	{
 		const TArrayView<FGatherersMassAntFragment> AntFragments =
 			ChunkContext.GetMutableFragmentView<FGatherersMassAntFragment>();
@@ -66,7 +71,7 @@ void UGatherersAntMovementProcessor::Execute(FMassEntityManager& EntityManager, 
 				AntFragment.Position,
 				AntFragment.Direction,
 				AntFragment.MovementSpeed,
-				GatherersMassSafeMovementStepDistance,
+				BoundsMaxStepDistance,
 				DeltaSeconds);
 
 			if (!SimulationBounds.IsValid)

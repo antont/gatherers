@@ -586,13 +586,27 @@ void UGatherersMassSubsystem::Tick(float DeltaTime)
 	const float SimulatedSecondsThisFrame = FMath::Max(0.0f, DeltaTime) * FMath::Max(0.0f, SimulationRateMultiplier);
 	SimulationTimeAccumulatorSeconds += SimulatedSecondsThisFrame;
 
-	const float SafeFixedStepSeconds = FMath::Max(KINDA_SMALL_NUMBER, FixedSimulationStepSeconds);
+	const FVector BoundsSize = SimulationBounds.GetSize();
+	const float BoundsMaxStepDistance = SimulationBounds.IsValid
+		? 0.5f * FMath::Min(BoundsSize.X, BoundsSize.Y)
+		: 500.0f;
+	const float DefaultMovementSpeed = 100.0f;
+	const float MaxStepSeconds = BoundsMaxStepDistance / FMath::Max(KINDA_SMALL_NUMBER, DefaultMovementSpeed);
+
 	int32 StepsExecutedThisFrame = 0;
-	while (SimulationTimeAccumulatorSeconds + KINDA_SMALL_NUMBER >= SafeFixedStepSeconds
+	while (SimulationTimeAccumulatorSeconds >= MaxStepSeconds
 		&& StepsExecutedThisFrame < MaxSimulationStepsPerTick)
 	{
-		RunSimulationProcessorStep(SafeFixedStepSeconds);
-		SimulationTimeAccumulatorSeconds = FMath::Max(0.0f, SimulationTimeAccumulatorSeconds - SafeFixedStepSeconds);
+		RunSimulationProcessorStep(MaxStepSeconds);
+		SimulationTimeAccumulatorSeconds -= MaxStepSeconds;
+		++StepsExecutedThisFrame;
+	}
+
+	if (SimulationTimeAccumulatorSeconds > KINDA_SMALL_NUMBER
+		&& StepsExecutedThisFrame < MaxSimulationStepsPerTick)
+	{
+		RunSimulationProcessorStep(SimulationTimeAccumulatorSeconds);
+		SimulationTimeAccumulatorSeconds = 0.0f;
 		++StepsExecutedThisFrame;
 	}
 
@@ -601,7 +615,7 @@ void UGatherersMassSubsystem::Tick(float DeltaTime)
 		SimulationTimeAccumulatorSeconds = 0.0f;
 	}
 
-	RunVisualSyncProcessor(SafeFixedStepSeconds);
+	RunVisualSyncProcessor(0.0f);
 }
 
 TStatId UGatherersMassSubsystem::GetStatId() const
@@ -797,11 +811,6 @@ void UGatherersMassSubsystem::SetSimulationRateMultiplier(float NewSimulationRat
 float UGatherersMassSubsystem::GetSimulationRateMultiplier() const
 {
 	return SimulationRateMultiplier;
-}
-
-float UGatherersMassSubsystem::GetFixedSimulationStepSeconds() const
-{
-	return FixedSimulationStepSeconds;
 }
 
 AAnt* UGatherersMassSubsystem::GetAntProxyActor(FMassEntityHandle AntEntity) const

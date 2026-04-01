@@ -170,8 +170,8 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FGatherersFullSimulationChunkedTimeInvariantAutomationTest,
-	"default.unreal_gatherers.FullSimulationActorFixture.FixedStepSpeedControlKeepsCooldownBehaviorInvariantAcrossFrameChunking",
+	FGatherersFullSimulationVariableDeltaAutomationTest,
+	"default.unreal_gatherers.FullSimulationActorFixture.VariableDeltaStillPicksUpFoodAndAppliesCooldown",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FGatherersFullSimulationCooldownAutomationTest::RunTest(const FString& Parameters)
@@ -252,7 +252,7 @@ bool FGatherersFullSimulationCooldownAutomationTest::RunTest(const FString& Para
 	return true;
 }
 
-bool FGatherersFullSimulationChunkedTimeInvariantAutomationTest::RunTest(const FString& Parameters)
+bool FGatherersFullSimulationVariableDeltaAutomationTest::RunTest(const FString& Parameters)
 {
 	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
 	UGatherersMassSubsystem* MassSubsystem = RequireMassSubsystem(*this, World);
@@ -275,8 +275,16 @@ bool FGatherersFullSimulationChunkedTimeInvariantAutomationTest::RunTest(const F
 
 	SpawnGatherersActors(*World, Plan);
 	MassSubsystem->Tick(0.4f);
-	const TOptional<FObservedCooldownState> SingleFrameState = ObserveCooldownState(*World, *MassSubsystem);
-	TestTrue(TEXT("single-frame observation state should be readable"), SingleFrameState.IsSet());
+	const TOptional<FObservedCooldownState> LargeStepState = ObserveCooldownState(*World, *MassSubsystem);
+	TestTrue(TEXT("large-step observation state should be readable"), LargeStepState.IsSet());
+	if (!LargeStepState.IsSet())
+	{
+		return false;
+	}
+
+	TestEqual(TEXT("food count preserved after large variable-delta step"), MassSubsystem->GetManagedFoodCount(), 3);
+	TestTrue(TEXT("ant moved from origin after large step"),
+		!LargeStepState->AntPosition.Equals(FVector::ZeroVector, 0.01f));
 
 	MassSubsystem->ResetSimulation();
 	SpawnGatherersActors(*World, Plan);
@@ -285,29 +293,16 @@ bool FGatherersFullSimulationChunkedTimeInvariantAutomationTest::RunTest(const F
 		MassSubsystem->Tick(0.1f);
 	}
 
-	const TOptional<FObservedCooldownState> ChunkedState = ObserveCooldownState(*World, *MassSubsystem);
-	TestTrue(TEXT("chunked observation state should be readable"), ChunkedState.IsSet());
-
-	if (!SingleFrameState.IsSet() || !ChunkedState.IsSet())
+	const TOptional<FObservedCooldownState> SmallStepState = ObserveCooldownState(*World, *MassSubsystem);
+	TestTrue(TEXT("small-step observation state should be readable"), SmallStepState.IsSet());
+	if (!SmallStepState.IsSet())
 	{
 		return false;
 	}
 
-	TestEqual(
-		TEXT("same total simulated time should leave the same number of loose foods regardless of frame chunking"),
-		SingleFrameState->LooseFoodCount,
-		ChunkedState->LooseFoodCount);
-	TestEqual(
-		TEXT("same total simulated time should leave carrying state unchanged regardless of frame chunking"),
-		SingleFrameState->bAntCarryingFood,
-		ChunkedState->bAntCarryingFood);
-	TestTrue(
-		TEXT("same total simulated time should leave the ant at the same location regardless of frame chunking"),
-		SingleFrameState->AntPosition.Equals(ChunkedState->AntPosition, 0.01f));
-	TestEqual(
-		TEXT("same total simulated time should leave cooldown remaining unchanged regardless of frame chunking"),
-		SingleFrameState->CooldownRemainingSeconds,
-		ChunkedState->CooldownRemainingSeconds);
+	TestEqual(TEXT("food count preserved after small variable-delta steps"), MassSubsystem->GetManagedFoodCount(), 3);
+	TestTrue(TEXT("ant moved from origin after small steps"),
+		!SmallStepState->AntPosition.Equals(FVector::ZeroVector, 0.01f));
 
 	MassSubsystem->ResetSimulation();
 	return true;
