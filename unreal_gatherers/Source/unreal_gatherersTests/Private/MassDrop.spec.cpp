@@ -63,8 +63,8 @@ bool FGatherersMassDropAutomationTest::RunTest(const FString& Parameters)
 		return false;
 	}
 
-	MassSubsystem->Tick(0.1f);
-	MassSubsystem->Tick(0.1f);
+	MassSubsystem->RunSimulationProcessorsForTesting(0.1f);
+	MassSubsystem->RunSimulationProcessorsForTesting(0.1f);
 
 	UMassEntitySubsystem* MassEntitySubsystem = World->GetSubsystem<UMassEntitySubsystem>();
 	TestNotNull(TEXT("Mass entity subsystem should exist"), MassEntitySubsystem);

@@ -1,6 +1,7 @@
 #include "Actors/Ant.h"
 #include "Actors/Food.h"
 #include "Editor.h"
+#include "GameFramework/WorldSettings.h"
 #include "HAL/PlatformTime.h"
 #include "Misc/AutomationTest.h"
 #include "Simulation/GatherersMassSubsystem.h"
@@ -69,9 +70,13 @@ bool FGatherersWaitForStartupActorsCommand::Update()
 			GameMode->GetTimeControlMode(),
 			GameMode->GetStartupTimeControlMode());
 		Test->TestEqual(
-			TEXT("startup world time dilation should match the startup mode"),
+			TEXT("startup world time dilation should stay at 1x because startup speed uses the simulation clock"),
 			World->GetWorldSettings()->GetEffectiveTimeDilation(),
-			Aunreal_gatherersGameModeBase::GetTimeDilationForMode(GameMode->GetStartupTimeControlMode()));
+			1.0f);
+		Test->TestEqual(
+			TEXT("startup simulation rate should match the startup mode"),
+			MassSubsystem->GetSimulationRateMultiplier(),
+			Aunreal_gatherersGameModeBase::GetSimulationRateForMode(GameMode->GetStartupTimeControlMode()));
 	}
 	return true;
 }

@@ -126,7 +126,7 @@ bool UGatherersMassSubsystem::EnsureProcessorPipelines(UMassEntitySubsystem& Mas
 	return true;
 }
 
-void UGatherersMassSubsystem::RunProcessorPipelines(float DeltaTime, bool bIncludeVisualSync)
+void UGatherersMassSubsystem::RunSimulationProcessorStep(float SimulatedDeltaTime)
 {
 	if (!HasManagedSimulation())
 	{
@@ -146,27 +146,11 @@ void UGatherersMassSubsystem::RunProcessorPipelines(float DeltaTime, bool bInclu
 	}
 
 	FMassEntityManager& EntityManager = MassEntitySubsystem->GetMutableEntityManager();
-	FMassProcessingContext SimulationContext(EntityManager, DeltaTime);
+	FMassProcessingContext SimulationContext(EntityManager, SimulatedDeltaTime);
 	UE::Mass::Executor::Run(SimulationProcessorPipeline, SimulationContext);
-
-	if (bIncludeVisualSync)
-	{
-		FMassProcessingContext VisualContext(EntityManager, DeltaTime);
-		UE::Mass::Executor::Run(VisualProcessorPipeline, VisualContext);
-	}
 }
 
-void UGatherersMassSubsystem::RunSimulationProcessorsForTesting(float DeltaTime)
-{
-	RunProcessorPipelines(DeltaTime, false);
-}
-
-void UGatherersMassSubsystem::AdvanceAccumulatedSimulationSeconds(float DeltaTime)
-{
-	AccumulatedSimulationSeconds += FMath::Max(0.0f, DeltaTime);
-}
-
-void UGatherersMassSubsystem::SyncManagedVisuals()
+void UGatherersMassSubsystem::RunVisualSyncProcessor(float SimulatedDeltaTime)
 {
 	if (!HasManagedSimulation())
 	{
@@ -180,12 +164,14 @@ void UGatherersMassSubsystem::SyncManagedVisuals()
 	}
 
 	UMassEntitySubsystem* MassEntitySubsystem = World->GetSubsystem<UMassEntitySubsystem>();
-	if (MassEntitySubsystem == nullptr)
+	if (MassEntitySubsystem == nullptr || !EnsureProcessorPipelines(*MassEntitySubsystem))
 	{
 		return;
 	}
 
-	SyncVisualInstances(*MassEntitySubsystem);
+	FMassEntityManager& EntityManager = MassEntitySubsystem->GetMutableEntityManager();
+	FMassProcessingContext VisualContext(EntityManager, SimulatedDeltaTime);
+	UE::Mass::Executor::Run(VisualProcessorPipeline, VisualContext);
 }
 
 bool UGatherersMassSubsystem::EnsureVisualComponents()
@@ -591,7 +577,31 @@ void UGatherersMassSubsystem::SyncVisualInstances(UMassEntitySubsystem& MassEnti
 void UGatherersMassSubsystem::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
-	RunProcessorPipelines(DeltaTime, true);
+
+	if (!HasManagedSimulation())
+	{
+		return;
+	}
+
+	const float SimulatedSecondsThisFrame = FMath::Max(0.0f, DeltaTime) * FMath::Max(0.0f, SimulationRateMultiplier);
+	SimulationTimeAccumulatorSeconds += SimulatedSecondsThisFrame;
+
+	const float SafeFixedStepSeconds = FMath::Max(KINDA_SMALL_NUMBER, FixedSimulationStepSeconds);
+	int32 StepsExecutedThisFrame = 0;
+	while (SimulationTimeAccumulatorSeconds + KINDA_SMALL_NUMBER >= SafeFixedStepSeconds
+		&& StepsExecutedThisFrame < MaxSimulationStepsPerTick)
+	{
+		RunSimulationProcessorStep(SafeFixedStepSeconds);
+		SimulationTimeAccumulatorSeconds = FMath::Max(0.0f, SimulationTimeAccumulatorSeconds - SafeFixedStepSeconds);
+		++StepsExecutedThisFrame;
+	}
+
+	if (StepsExecutedThisFrame == MaxSimulationStepsPerTick)
+	{
+		SimulationTimeAccumulatorSeconds = 0.0f;
+	}
+
+	RunVisualSyncProcessor(SafeFixedStepSeconds);
 }
 
 TStatId UGatherersMassSubsystem::GetStatId() const
@@ -714,6 +724,7 @@ void UGatherersMassSubsystem::ResetSimulation()
 	ManagedFoodEntities.Reset();
 	SimulationBounds = FBox(EForceInit::ForceInit);
 	AccumulatedSimulationSeconds = 0.0f;
+	SimulationTimeAccumulatorSeconds = 0.0f;
 	SimulationProcessorPipeline.Reset();
 	VisualProcessorPipeline.Reset();
 	bProcessorPipelinesInitialized = false;
@@ -737,6 +748,48 @@ bool UGatherersMassSubsystem::HasManagedSimulation() const
 float UGatherersMassSubsystem::GetAccumulatedSimulationSeconds() const
 {
 	return AccumulatedSimulationSeconds;
+}
+
+void UGatherersMassSubsystem::RunSimulationProcessorsForTesting(float DeltaTime)
+{
+	RunSimulationProcessorStep(FMath::Max(0.0f, DeltaTime));
+}
+
+void UGatherersMassSubsystem::AdvanceAccumulatedSimulationSeconds(float DeltaTime)
+{
+	AccumulatedSimulationSeconds += FMath::Max(0.0f, DeltaTime);
+}
+
+void UGatherersMassSubsystem::SyncManagedVisuals()
+{
+	UWorld* World = GetWorld();
+	if (World == nullptr)
+	{
+		return;
+	}
+
+	UMassEntitySubsystem* MassEntitySubsystem = World->GetSubsystem<UMassEntitySubsystem>();
+	if (MassEntitySubsystem == nullptr)
+	{
+		return;
+	}
+
+	SyncVisualInstances(*MassEntitySubsystem);
+}
+
+void UGatherersMassSubsystem::SetSimulationRateMultiplier(float NewSimulationRateMultiplier)
+{
+	SimulationRateMultiplier = FMath::Max(0.0f, NewSimulationRateMultiplier);
+}
+
+float UGatherersMassSubsystem::GetSimulationRateMultiplier() const
+{
+	return SimulationRateMultiplier;
+}
+
+float UGatherersMassSubsystem::GetFixedSimulationStepSeconds() const
+{
+	return FixedSimulationStepSeconds;
 }
 
 const FBox& UGatherersMassSubsystem::GetSimulationBounds() const

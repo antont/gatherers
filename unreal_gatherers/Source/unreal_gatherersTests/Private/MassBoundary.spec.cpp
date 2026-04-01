@@ -52,8 +52,8 @@ bool FGatherersMassBoundaryAutomationTest::RunTest(const FString& Parameters)
 		MassSubsystem->GetSimulationBounds().Min.Equals(Plan.PlayAreaBounds.Min, KINDA_SMALL_NUMBER)
 			&& MassSubsystem->GetSimulationBounds().Max.Equals(Plan.PlayAreaBounds.Max, KINDA_SMALL_NUMBER));
 
-	MassSubsystem->Tick(0.1f);
-	MassSubsystem->Tick(0.1f);
+	MassSubsystem->RunSimulationProcessorsForTesting(0.1f);
+	MassSubsystem->RunSimulationProcessorsForTesting(0.1f);
 
 	UMassEntitySubsystem* MassEntitySubsystem = World->GetSubsystem<UMassEntitySubsystem>();
 	TestNotNull(TEXT("Mass entity subsystem should exist"), MassEntitySubsystem);

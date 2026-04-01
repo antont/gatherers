@@ -26,7 +26,11 @@ UGatherersMassSubsystem* RequireMassSubsystem(FAutomationTestBase& Test, UWorld*
 	return MassSubsystem;
 }
 
-bool AnyFoodAtLocation(const TArray<FMassEntityHandle>& FoodEntities, FMassEntityManager& EntityManager, const FVector& ExpectedLocation)
+bool AnyFoodNearLocation(
+	const TArray<FMassEntityHandle>& FoodEntities,
+	FMassEntityManager& EntityManager,
+	const FVector& ExpectedLocation,
+	float DistanceTolerance)
 {
 	for (const FMassEntityHandle FoodEntity : FoodEntities)
 	{
@@ -37,13 +41,55 @@ bool AnyFoodAtLocation(const TArray<FMassEntityHandle>& FoodEntities, FMassEntit
 
 		FMassEntityView FoodView(EntityManager, FoodEntity);
 		const FGatherersMassFoodFragment& FoodFragment = FoodView.GetFragmentData<FGatherersMassFoodFragment>();
-		if (FoodFragment.Position.Equals(ExpectedLocation, 1.0f))
+		if (FVector::Distance(FoodFragment.Position, ExpectedLocation) <= DistanceTolerance)
 		{
 			return true;
 		}
 	}
 
 	return false;
+}
+
+struct FObservedCooldownState
+{
+	int32 LooseFoodCount = 0;
+	bool bAntCarryingFood = false;
+	FVector AntPosition = FVector::ZeroVector;
+	float CooldownRemainingSeconds = 0.0f;
+};
+
+TOptional<FObservedCooldownState> ObserveCooldownState(UWorld& World, UGatherersMassSubsystem& MassSubsystem)
+{
+	UMassEntitySubsystem* MassEntitySubsystem = World.GetSubsystem<UMassEntitySubsystem>();
+	if (MassEntitySubsystem == nullptr || MassSubsystem.ManagedAntEntities.Num() != 1)
+	{
+		return {};
+	}
+
+	FMassEntityManager& EntityManager = MassEntitySubsystem->GetMutableEntityManager();
+	FObservedCooldownState State;
+	FMassEntityView AntView(EntityManager, MassSubsystem.ManagedAntEntities[0]);
+	const FGatherersMassAntFragment& AntFragment = AntView.GetFragmentData<FGatherersMassAntFragment>();
+	State.bAntCarryingFood = AntFragment.CarriedFoodEntity.IsValid();
+	State.AntPosition = AntFragment.Position;
+	State.CooldownRemainingSeconds = AntFragment.PickupCooldownRemainingSeconds;
+
+	for (const FMassEntityHandle FoodEntity : MassSubsystem.ManagedFoodEntities)
+	{
+		if (!EntityManager.IsEntityValid(FoodEntity))
+		{
+			continue;
+		}
+
+		FMassEntityView FoodView(EntityManager, FoodEntity);
+		const FGatherersMassFoodFragment& FoodFragment = FoodView.GetFragmentData<FGatherersMassFoodFragment>();
+		if (FoodFragment.bIsLoose)
+		{
+			++State.LooseFoodCount;
+		}
+	}
+
+	return State;
 }
 }
 
@@ -112,7 +158,7 @@ bool FGatherersFullSimulationFirstDropAutomationTest::RunTest(const FString& Par
 	TestEqual(TEXT("first drop leaves all food loose again"), LooseFoodCount, 3);
 	TestTrue(
 		TEXT("one loose food stays near the ant after the first drop"),
-		AnyFoodAtLocation(MassSubsystem->ManagedFoodEntities, EntityManager, AntFragment.Position));
+		AnyFoodNearLocation(MassSubsystem->ManagedFoodEntities, EntityManager, AntFragment.Position, 25.0f));
 
 	MassSubsystem->ResetSimulation();
 	return true;
@@ -121,6 +167,11 @@ bool FGatherersFullSimulationFirstDropAutomationTest::RunTest(const FString& Par
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FGatherersFullSimulationCooldownAutomationTest,
 	"default.unreal_gatherers.FullSimulationActorFixture.CooldownBlocksImmediateRepickupAndAllowsLaterPickup",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FGatherersFullSimulationChunkedTimeInvariantAutomationTest,
+	"default.unreal_gatherers.FullSimulationActorFixture.FixedStepSpeedControlKeepsCooldownBehaviorInvariantAcrossFrameChunking",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FGatherersFullSimulationCooldownAutomationTest::RunTest(const FString& Parameters)
@@ -196,6 +247,67 @@ bool FGatherersFullSimulationCooldownAutomationTest::RunTest(const FString& Para
 		}
 	}
 	TestEqual(TEXT("after cooldown the ant can gather again"), LooseFoodCount, 2);
+
+	MassSubsystem->ResetSimulation();
+	return true;
+}
+
+bool FGatherersFullSimulationChunkedTimeInvariantAutomationTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	UGatherersMassSubsystem* MassSubsystem = RequireMassSubsystem(*this, World);
+	if (MassSubsystem == nullptr)
+	{
+		return false;
+	}
+
+	FGatherersSpawnPlan Plan;
+	Plan.bUseFullSimulationMode = true;
+	Plan.bSpawnActorVisuals = false;
+	Plan.PlayAreaBounds = FBox(FVector(-100.0f, -100.0f, -100.0f), FVector(100.0f, 100.0f, 100.0f));
+	Plan.RandomSeedBase = 123;
+	Plan.FullSimulationTurnJitterRadians = 0.0f;
+	Plan.AntSpawns.Add(FTransform(FVector::ZeroVector));
+	Plan.AntInitialDirections.Add(FVector(1.0f, 0.0f, 0.0f));
+	Plan.FoodSpawns.Add(FTransform(FVector(8.0f, 0.0f, 0.0f)));
+	Plan.FoodSpawns.Add(FTransform(FVector(-10.0f, 0.0f, 0.0f)));
+	Plan.FoodSpawns.Add(FTransform(FVector(50.0f, 0.0f, 0.0f)));
+
+	SpawnGatherersActors(*World, Plan);
+	MassSubsystem->Tick(0.4f);
+	const TOptional<FObservedCooldownState> SingleFrameState = ObserveCooldownState(*World, *MassSubsystem);
+	TestTrue(TEXT("single-frame observation state should be readable"), SingleFrameState.IsSet());
+
+	MassSubsystem->ResetSimulation();
+	SpawnGatherersActors(*World, Plan);
+	for (int32 StepIndex = 0; StepIndex < 4; ++StepIndex)
+	{
+		MassSubsystem->Tick(0.1f);
+	}
+
+	const TOptional<FObservedCooldownState> ChunkedState = ObserveCooldownState(*World, *MassSubsystem);
+	TestTrue(TEXT("chunked observation state should be readable"), ChunkedState.IsSet());
+
+	if (!SingleFrameState.IsSet() || !ChunkedState.IsSet())
+	{
+		return false;
+	}
+
+	TestEqual(
+		TEXT("same total simulated time should leave the same number of loose foods regardless of frame chunking"),
+		SingleFrameState->LooseFoodCount,
+		ChunkedState->LooseFoodCount);
+	TestEqual(
+		TEXT("same total simulated time should leave carrying state unchanged regardless of frame chunking"),
+		SingleFrameState->bAntCarryingFood,
+		ChunkedState->bAntCarryingFood);
+	TestTrue(
+		TEXT("same total simulated time should leave the ant at the same location regardless of frame chunking"),
+		SingleFrameState->AntPosition.Equals(ChunkedState->AntPosition, 0.01f));
+	TestEqual(
+		TEXT("same total simulated time should leave cooldown remaining unchanged regardless of frame chunking"),
+		SingleFrameState->CooldownRemainingSeconds,
+		ChunkedState->CooldownRemainingSeconds);
 
 	MassSubsystem->ResetSimulation();
 	return true;

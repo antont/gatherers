@@ -1,4 +1,5 @@
 #include "Editor.h"
+#include "GameFramework/WorldSettings.h"
 #include "HAL/PlatformTime.h"
 #include "MassEntitySubsystem.h"
 #include "MassEntityView.h"
@@ -136,8 +137,8 @@ public:
 
 		UGatherersMassSubsystem* MassSubsystem = World->GetSubsystem<UGatherersMassSubsystem>();
 		UMassEntitySubsystem* MassEntitySubsystem = World->GetSubsystem<UMassEntitySubsystem>();
-		Test->TestNotNull(TEXT("time-dilation sweep Mass subsystem should exist"), MassSubsystem);
-		Test->TestNotNull(TEXT("time-dilation sweep Mass entity subsystem should exist"), MassEntitySubsystem);
+		Test->TestNotNull(TEXT("time-rate sweep Mass subsystem should exist"), MassSubsystem);
+		Test->TestNotNull(TEXT("time-rate sweep Mass entity subsystem should exist"), MassEntitySubsystem);
 		if (MassSubsystem == nullptr || MassEntitySubsystem == nullptr || World->GetWorldSettings() == nullptr)
 		{
 			return true;
@@ -145,7 +146,8 @@ public:
 
 		if (!bCandidatePrepared)
 		{
-			World->GetWorldSettings()->SetTimeDilation(static_cast<float>(CurrentCandidateDilation));
+			World->GetWorldSettings()->SetTimeDilation(1.0f);
+			MassSubsystem->SetSimulationRateMultiplier(static_cast<float>(CurrentCandidateDilation));
 			MassSubsystem->ResetSimulation();
 			SpawnGatherersActors(*World, BuildTimeDilationSweepFixturePlan());
 			CandidateStartTimeSeconds = FPlatformTime::Seconds();
@@ -162,7 +164,7 @@ public:
 			EvaluateSweepCandidate(*MassSubsystem, *MassEntitySubsystem, CurrentCandidateDilation);
 		Results->CandidateResults.Add(CandidateResult);
 		Test->AddInfo(FString::Printf(
-			TEXT("time-dilation sweep candidate %dx: %s (sim_seconds=%.3f carried=%d loose=%d)"),
+			TEXT("time-rate sweep candidate %dx: %s (sim_seconds=%.3f carried=%d loose=%d)"),
 			CandidateResult.Dilation,
 			CandidateResult.bPassed ? TEXT("PASS") : TEXT("FAIL"),
 			CandidateResult.AccumulatedSimulationSeconds,
@@ -175,6 +177,7 @@ public:
 		}
 
 		MassSubsystem->ResetSimulation();
+		MassSubsystem->SetSimulationRateMultiplier(1.0f);
 		World->GetWorldSettings()->SetTimeDilation(1.0f);
 		bCandidatePrepared = false;
 		CandidateStartTimeSeconds.Reset();
@@ -257,10 +260,10 @@ public:
 
 	bool Update() override
 	{
-		Test->TestTrue(TEXT("time-dilation sweep should evaluate at least one candidate"), Results->CandidateResults.Num() > 0);
-		Test->TestTrue(TEXT("time-dilation sweep should find at least a modest passing dilation"), Results->HighestPassingDilation >= 4);
+		Test->TestTrue(TEXT("time-rate sweep should evaluate at least one candidate"), Results->CandidateResults.Num() > 0);
+		Test->TestTrue(TEXT("time-rate sweep should find at least a modest passing rate"), Results->HighestPassingDilation >= 4);
 		Test->AddInfo(FString::Printf(
-			TEXT("time-dilation sweep highest passing dilation: %dx%s"),
+			TEXT("time-rate sweep highest passing sim rate: %dx%s"),
 			Results->HighestPassingDilation,
 			Results->bReachedMaxTestedDilation ? TEXT(" (reached max tested candidate)") : TEXT("")));
 		return true;

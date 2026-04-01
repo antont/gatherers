@@ -61,8 +61,8 @@ bool FGatherersMassTurnAutomationTest::RunTest(const FString& Parameters)
 		PI / 2.0f);
 	const FVector ExpectedLocationAfterSecondTick = FVector(10.0f, 0.0f, 0.0f) + ExpectedTurnDirection * 10.0f;
 
-	MassSubsystem->Tick(0.1f);
-	MassSubsystem->Tick(0.1f);
+	MassSubsystem->RunSimulationProcessorsForTesting(0.1f);
+	MassSubsystem->RunSimulationProcessorsForTesting(0.1f);
 
 	UMassEntitySubsystem* MassEntitySubsystem = World->GetSubsystem<UMassEntitySubsystem>();
 	TestNotNull(TEXT("Mass entity subsystem should exist"), MassEntitySubsystem);

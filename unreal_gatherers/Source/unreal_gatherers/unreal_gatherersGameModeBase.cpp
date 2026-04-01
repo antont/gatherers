@@ -6,6 +6,7 @@
 #include "HAL/PlatformTime.h"
 #include "GameFramework/WorldSettings.h"
 #include "Input/GatherersPlayerController.h"
+#include "Simulation/GatherersMassSubsystem.h"
 #include "Simulation/GatherersSpawnPlan.h"
 #include "Simulation/GatherersWorldSpawner.h"
 #include "UI/GatherersTimeControlWidget.h"
@@ -58,7 +59,12 @@ void Aunreal_gatherersGameModeBase::ApplyTimeControlModeToWorld(UWorld& World, E
 {
 	if (AWorldSettings* WorldSettings = World.GetWorldSettings())
 	{
-		WorldSettings->SetTimeDilation(GetTimeDilationForMode(NewMode));
+		WorldSettings->SetTimeDilation(1.0f);
+	}
+
+	if (UGatherersMassSubsystem* MassSubsystem = World.GetSubsystem<UGatherersMassSubsystem>())
+	{
+		MassSubsystem->SetSimulationRateMultiplier(GetSimulationRateForMode(NewMode));
 	}
 
 	if (Aunreal_gatherersGameModeBase* GatherersGameMode = World.GetAuthGameMode<Aunreal_gatherersGameModeBase>())
@@ -105,7 +111,7 @@ void Aunreal_gatherersGameModeBase::SetTimeControlWidget(UGatherersTimeControlWi
 	RefreshTimeControlWidget();
 }
 
-float Aunreal_gatherersGameModeBase::GetTimeDilationForMode(EGatherersTimeControlMode Mode)
+float Aunreal_gatherersGameModeBase::GetSimulationRateForMode(EGatherersTimeControlMode Mode)
 {
 	switch (Mode)
 	{

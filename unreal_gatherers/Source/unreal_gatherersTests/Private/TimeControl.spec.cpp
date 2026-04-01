@@ -1,4 +1,5 @@
 #include "Editor.h"
+#include "GameFramework/WorldSettings.h"
 #include "HAL/PlatformTime.h"
 #include "MassEntitySubsystem.h"
 #include "MassEntityView.h"
@@ -25,6 +26,8 @@ struct FTimeControlObservationResults
 	float FastDistance = 0.0f;
 	float NormalSimulatedSeconds = 0.0f;
 	float FastSimulatedSeconds = 0.0f;
+	float NormalWorldTimeDilation = 0.0f;
+	float FastWorldTimeDilation = 0.0f;
 };
 
 FGatherersSpawnPlan BuildSingleAntTimeControlFixturePlan()
@@ -157,11 +160,17 @@ public:
 		{
 			Results->FastDistance = AntFragment.Position.X;
 			Results->FastSimulatedSeconds = MassSubsystem->GetAccumulatedSimulationSeconds();
+			Results->FastWorldTimeDilation = World->GetWorldSettings() != nullptr
+				? World->GetWorldSettings()->GetEffectiveTimeDilation()
+				: 0.0f;
 		}
 		else
 		{
 			Results->NormalDistance = AntFragment.Position.X;
 			Results->NormalSimulatedSeconds = MassSubsystem->GetAccumulatedSimulationSeconds();
+			Results->NormalWorldTimeDilation = World->GetWorldSettings() != nullptr
+				? World->GetWorldSettings()->GetEffectiveTimeDilation()
+				: 0.0f;
 		}
 		return true;
 	}
@@ -187,15 +196,23 @@ public:
 
 	bool Update() override
 	{
+		Test->TestEqual(
+			TEXT("normal mode should leave Unreal world time dilation at 1x because speed control belongs to the sim clock"),
+			Results->NormalWorldTimeDilation,
+			1.0f);
+		Test->TestEqual(
+			TEXT("fast mode should also leave Unreal world time dilation at 1x because speed control belongs to the sim clock"),
+			Results->FastWorldTimeDilation,
+			1.0f);
 		Test->TestTrue(TEXT("normal mode should advance the ant at least a little"), Results->NormalDistance > 1.0f);
 		Test->TestTrue(
 			TEXT("normal mode should accumulate simulated seconds while the fixture runs"),
 			Results->NormalSimulatedSeconds >= 0.20f);
 		Test->TestTrue(
-			TEXT("fast world time should advance the ant farther than normal over the same wall-clock window"),
+			TEXT("fast sim rate should advance the ant farther than normal over the same wall-clock window"),
 			Results->FastDistance > (Results->NormalDistance + 10.0f));
 		Test->TestTrue(
-			TEXT("fast world time should accumulate about four times the simulated seconds seen in normal mode"),
+			TEXT("fast sim rate should accumulate about four times the simulated seconds seen in normal mode"),
 			Results->FastSimulatedSeconds >= (Results->NormalSimulatedSeconds * 3.5f));
 		return true;
 	}
@@ -320,14 +337,18 @@ public:
 			GameMode->GetTimeControlMode(),
 			EGatherersTimeControlMode::Fast);
 		Test->TestEqual(
+			TEXT("fast mode should leave world dilation at 1x because the simulation clock owns speed"),
+			World->GetWorldSettings()->GetEffectiveTimeDilation(),
+			1.0f);
+		Test->TestEqual(
 			TEXT("time-control widget should update its label after toggling"),
 			Widget->GetCurrentModeLabel(),
 			FString(TEXT("Fast")));
 
 		Test->TestTrue(
-			TEXT("max-correct mode should use a higher dilation than the existing fast mode"),
-			Aunreal_gatherersGameModeBase::GetTimeDilationForMode(EGatherersTimeControlMode::MaxCorrect)
-				> Aunreal_gatherersGameModeBase::GetTimeDilationForMode(EGatherersTimeControlMode::Fast));
+			TEXT("max-correct mode should use a higher simulation rate than the existing fast mode"),
+			Aunreal_gatherersGameModeBase::GetSimulationRateForMode(EGatherersTimeControlMode::MaxCorrect)
+				> Aunreal_gatherersGameModeBase::GetSimulationRateForMode(EGatherersTimeControlMode::Fast));
 
 		Widget->TriggerToggleFromUI();
 
@@ -335,6 +356,10 @@ public:
 			TEXT("a second UI toggle should switch the world time mode to max-correct"),
 			GameMode->GetTimeControlMode(),
 			EGatherersTimeControlMode::MaxCorrect);
+		Test->TestEqual(
+			TEXT("max-correct mode should also leave world dilation at 1x because the simulation clock owns speed"),
+			World->GetWorldSettings()->GetEffectiveTimeDilation(),
+			1.0f);
 		Test->TestEqual(
 			TEXT("time-control widget should show the measured max-correct dilation"),
 			Widget->GetCurrentModeLabel(),

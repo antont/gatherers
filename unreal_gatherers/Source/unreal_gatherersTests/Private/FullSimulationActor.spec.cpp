@@ -278,9 +278,7 @@ bool FGatherersFullSimulationFastWorldTimeSweptPickupAutomationTest::RunTest(con
 	}
 
 	const float RealSeconds = 0.25f;
-	const float SimulatedSeconds = RealSeconds
-		* Aunreal_gatherersGameModeBase::GetTimeDilationForMode(EGatherersTimeControlMode::Fast);
-	MassSubsystem->Tick(SimulatedSeconds);
+	MassSubsystem->Tick(RealSeconds);
 
 	UMassEntitySubsystem* MassEntitySubsystem = World->GetSubsystem<UMassEntitySubsystem>();
 	TestNotNull(TEXT("Mass entity subsystem should exist"), MassEntitySubsystem);
@@ -295,7 +293,7 @@ bool FGatherersFullSimulationFastWorldTimeSweptPickupAutomationTest::RunTest(con
 	const FGatherersMassAntFragment& AntFragment = AntView.GetFragmentData<FGatherersMassAntFragment>();
 	const FGatherersMassFoodFragment& FoodFragment = FoodView.GetFragmentData<FGatherersMassFoodFragment>();
 	TestTrue(
-		TEXT("fast world time should keep swept-path pickup behavior correct for long simulated movement"),
+		TEXT("fast sim rate should keep swept-path pickup behavior correct for long simulated movement"),
 		AntFragment.CarriedFoodEntity == MassSubsystem->ManagedFoodEntities[0] && !FoodFragment.bIsLoose);
 
 	MassSubsystem->ResetSimulation();

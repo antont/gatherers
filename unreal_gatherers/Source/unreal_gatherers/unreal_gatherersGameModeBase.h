@@ -33,7 +33,7 @@ public:
 	EGatherersTimeControlMode GetStartupTimeControlMode() const;
 	UGatherersTimeControlWidget* GetTimeControlWidget() const;
 	void SetTimeControlWidget(UGatherersTimeControlWidget* Widget);
-	static float GetTimeDilationForMode(EGatherersTimeControlMode Mode);
+	static float GetSimulationRateForMode(EGatherersTimeControlMode Mode);
 
 private:
 	void RefreshTimeControlWidget();

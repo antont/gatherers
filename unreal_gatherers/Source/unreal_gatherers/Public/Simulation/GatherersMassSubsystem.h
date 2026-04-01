@@ -90,6 +90,7 @@ public:
 	void RunSimulationProcessorsForTesting(float DeltaTime);
 	void AdvanceAccumulatedSimulationSeconds(float DeltaTime);
 	void SyncManagedVisuals();
+	void SetSimulationRateMultiplier(float NewSimulationRateMultiplier);
 	TArray<FMassEntityHandle> QueryLooseFoodEntitiesOverlappingSphere(const FVector& Center, float Radius) const;
 	TArray<FMassEntityHandle> QueryLooseFoodEntitiesAlongSweep(const FVector& SweepStart, const FVector& SweepEnd, float Radius) const;
 
@@ -97,13 +98,16 @@ public:
 	int32 GetManagedFoodCount() const;
 	bool HasManagedSimulation() const;
 	float GetAccumulatedSimulationSeconds() const;
+	float GetSimulationRateMultiplier() const;
+	float GetFixedSimulationStepSeconds() const;
 	const FBox& GetSimulationBounds() const;
 	const UInstancedStaticMeshComponent* GetAntVisualComponent() const;
 	const UInstancedStaticMeshComponent* GetFoodRepresentationComponent() const;
 
 private:
 	bool EnsureProcessorPipelines(UMassEntitySubsystem& MassEntitySubsystem);
-	void RunProcessorPipelines(float DeltaTime, bool bIncludeVisualSync);
+	void RunSimulationProcessorStep(float SimulatedDeltaTime);
+	void RunVisualSyncProcessor(float SimulatedDeltaTime);
 	bool EnsureVisualComponents();
 	void RebuildVisualInstances(UMassEntitySubsystem& MassEntitySubsystem);
 	void SyncVisualInstances(UMassEntitySubsystem& MassEntitySubsystem);
@@ -113,6 +117,10 @@ public:
 	TArray<FMassEntityHandle> ManagedFoodEntities;
 	FBox SimulationBounds = FBox(EForceInit::ForceInit);
 	float AccumulatedSimulationSeconds = 0.0f;
+	float SimulationRateMultiplier = 1.0f;
+	float FixedSimulationStepSeconds = 1.0f / 60.0f;
+	float SimulationTimeAccumulatorSeconds = 0.0f;
+	int32 MaxSimulationStepsPerTick = 4096;
 
 private:
 	FMassRuntimePipeline SimulationProcessorPipeline;
