@@ -150,13 +150,9 @@ void UGatherersFoodInteractionProcessor::Execute(FMassEntityManager& EntityManag
 				NearbyFood = &NearbyFoodView.GetFragmentData<FGatherersMassFoodFragment>();
 			}
 
-			if (NearbyFood != nullptr)
-			{
-				AntFragment.Position = FirstEncounter->EncounterPosition;
-			}
-
 			if (AntFragment.CarriedFoodEntity.IsValid() && NearbyFood != nullptr)
 			{
+				AntFragment.Position = FirstEncounter->EncounterPosition;
 				AntFragment.Direction = ConsumeAntTurnDirection(AntFragment);
 
 				if (EntityManager.IsEntityValid(AntFragment.CarriedFoodEntity))
@@ -183,6 +179,7 @@ void UGatherersFoodInteractionProcessor::Execute(FMassEntityManager& EntityManag
 			{
 				if (NearbyFood != nullptr)
 				{
+					AntFragment.Position = FirstEncounter->EncounterPosition;
 					AntFragment.Direction = ConsumeAntTurnDirection(AntFragment);
 					AntFragment.CarriedFoodEntity = FirstEncounter->Entity;
 					NearbyFood->bIsLoose = false;
