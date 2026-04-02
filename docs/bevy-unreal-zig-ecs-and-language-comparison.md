@@ -135,6 +135,45 @@ Weaknesses:
 - more design decisions stay local and manual
 - it is easy to drift behaviorally from the Rust/Bevy reference unless parity is tested deliberately
 
+## Concrete Example: Variable-Delta Simulation and Speed Modes
+
+The Unreal port's speed control work illustrates how engine concerns shape ECS design in ways that a pure simulation framework like Bevy handles more transparently.
+
+### The problem
+
+The simulation needed to run faster than real time (4x, 27x, 100x) while remaining correct. In Bevy, this is mostly a matter of adjusting the fixed timestep — the framework handles the accumulator loop and the systems just see a delta time.
+
+In Unreal Mass, the same goal required confronting several engine-level concerns:
+
+- **Frame timing ownership**: Unreal's world tick, Mass processor execution, and the simulation clock are separate concepts that must be coordinated explicitly
+- **Bounds-derived step capping**: At high speed multipliers, naive fixed-timestep accumulation produces thousands of tiny steps per frame. The solution was to derive the maximum step size from the simulation bounds (`0.5 * min(BoundsSize.X, BoundsSize.Y) / MovementSpeed`), so each step covers meaningful distance without ants tunneling through interactions
+- **Accumulator loop redesign**: The tick loop runs large bounded steps first, then a remainder step, with a hard cap on steps per frame to prevent spiral-of-death stalls
+
+### The emergent behavior bug
+
+At 100x+ speed, food piling stopped working. Ants would pick up food and carry it across the entire step before encountering other food, so drops landed far from trigger food instead of nearby.
+
+The root cause was an architectural issue specific to the processor pipeline:
+
+1. The **movement processor** runs first and completes the full step
+2. The **food interaction processor** runs second and sweeps retroactively from PreviousPosition to Position
+3. When food was found along the sweep, the ant's Position was already at the end of the step — drops happened there, not at the encounter point
+
+The fix was to have the food interaction processor truncate `AntFragment.Position` to the encounter point when an interaction fires. This required the sweep query to return encounter positions alongside entity handles (`FGatherersMassFoodEncounter` struct), and careful placement of the truncation so it only fires when an actual pickup or drop occurs — otherwise ants with cooldown would get stuck at food they couldn't interact with.
+
+### What this illustrates
+
+In Bevy, the simulation systems would naturally process movement and food interaction within the same tick at the same position. The framework's fixed-timestep model keeps steps small enough that the "move then interact" split rarely produces visible artifacts.
+
+In Unreal Mass, the explicit processor pipeline, the separation between movement and interaction phases, and the variable-delta stepping all conspire to make this a real architectural problem that required:
+
+- a new query API (encounter positions)
+- careful conditional logic (only truncate on actual interaction)
+- TDD to catch the stuck-ant regression
+- understanding of how the processor execution order interacts with large time steps
+
+This is a concrete example of the document's earlier point: Unreal Mass code "often reflects engine constraints as much as the domain." The simulation rule is simple (stop at food), but the implementation must account for processor ordering, sweep geometry, cooldown state, and variable step sizes.
+
 ## Similarities Across The Three ECS Styles
 
 Despite the very different feel, all three share the same core wins:
@@ -286,6 +325,15 @@ The most effective pattern in this repo was:
 - then visual/manual or startup fixtures where appropriate
 
 That layered style matters because a pure end-to-end Unreal test is expensive and can be ambiguous when it fails. Unreal TDD works best when the lower-level tests define the behavior clearly and the heavier integration tests confirm that the engine wiring preserves it.
+
+The encounter-position fix is a good concrete example. The TDD cycle was:
+
+1. RED: write tests that verify ants stop at the food encounter point (not end of step) — these fail because the processor uses end-of-step position
+2. GREEN: add `FGatherersMassFoodEncounter` struct, new sweep query, and position truncation in the food interaction processor
+3. RED again: a regression test catches that ants get permanently stuck after dropping food (the truncation fires even during cooldown)
+4. GREEN: move truncation into the interaction branches only
+
+Each cycle caught a real bug that would have been hard to diagnose from visual observation alone. The stuck-ant bug in particular only manifested after a drop — exactly the kind of state-dependent regression that TDD is designed to catch early.
 
 ### In Zig
 
