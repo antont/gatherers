@@ -1,5 +1,6 @@
 #include "Input/GatherersPlayerController.h"
 
+#include "GameFramework/InputSettings.h"
 #include "UI/GatherersTimeControlWidget.h"
 #include "unreal_gatherers/unreal_gatherersGameModeBase.h"
 
@@ -31,4 +32,31 @@ void AGatherersPlayerController::BeginPlay()
 			TimeControlWidget->AddSlateToViewport();
 		}
 	}
+}
+
+void AGatherersPlayerController::SetupInputComponent()
+{
+	Super::SetupInputComponent();
+	if (InputComponent == nullptr)
+	{
+		return;
+	}
+
+	auto BindSpeedKey = [this](FKey Key, EGatherersTimeControlMode Mode)
+	{
+		FInputKeyBinding Binding(FInputChord(Key), IE_Pressed);
+		Binding.KeyDelegate.GetDelegateForManualSet().BindLambda([this, Mode]()
+		{
+			if (Aunreal_gatherersGameModeBase* GM = GetWorld() ? GetWorld()->GetAuthGameMode<Aunreal_gatherersGameModeBase>() : nullptr)
+			{
+				GM->ApplyTimeControlMode(Mode);
+			}
+		});
+		InputComponent->KeyBindings.Add(MoveTemp(Binding));
+	};
+
+	BindSpeedKey(EKeys::One, EGatherersTimeControlMode::Normal);
+	BindSpeedKey(EKeys::Two, EGatherersTimeControlMode::Fast);
+	BindSpeedKey(EKeys::Three, EGatherersTimeControlMode::VeryFast);
+	BindSpeedKey(EKeys::Zero, EGatherersTimeControlMode::Max);
 }

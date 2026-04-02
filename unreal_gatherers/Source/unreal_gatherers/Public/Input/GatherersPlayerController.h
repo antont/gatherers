@@ -12,6 +12,7 @@ class UNREAL_GATHERERS_API AGatherersPlayerController : public APlayerController
 
 public:
 	virtual void BeginPlay() override;
+	virtual void SetupInputComponent() override;
 
 private:
 	UPROPERTY(Transient)
