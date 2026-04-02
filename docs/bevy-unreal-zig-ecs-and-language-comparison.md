@@ -536,4 +536,4 @@ For this project, that combination is unusually useful:
 
 - [Bevy](https://bevyengine.org/) — Rust game engine with a built-in ECS
 - [Unreal Mass Entity](https://dev.epicgames.com/documentation/en-us/unreal-engine/mass-entity-in-unreal-engine) — Unreal Engine's ECS framework for lightweight entities
-- [zflecs](https://github.com/flecs-hub/zflecs) — Zig bindings for the [flecs](https://www.flecs.dev/) ECS library
+- [zflecs](https://github.com/zig-gamedev/zflecs) — Zig bindings for the [flecs](https://www.flecs.dev/) ECS library
