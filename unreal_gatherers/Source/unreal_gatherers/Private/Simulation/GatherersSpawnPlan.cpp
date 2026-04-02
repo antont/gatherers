@@ -4,7 +4,7 @@
 
 namespace
 {
-constexpr int32 RustFoodCount = 80;
+constexpr float RustReferenceFoodDensity = 80.0f / (1280.0f * 720.0f);
 constexpr int32 RustAntSpawnStep = 50;
 constexpr float RustAntSpawnY = 100.0f;
 constexpr float SpawnZ = 50.0f;
@@ -49,7 +49,10 @@ FGatherersSpawnPlan BuildDefaultGameFullSimulationSpawnPlan(
 		Plan.AntInitialDirections.Add(FVector(FMath::Cos(HeadingAngle), FMath::Sin(HeadingAngle), 0.0f));
 	}
 
-	for (int32 FoodIndex = 0; FoodIndex < RustFoodCount; ++FoodIndex)
+	const float BoundsArea = (2.0f * BoundsExtent.X) * (2.0f * BoundsExtent.Y);
+	const int32 FoodCount = FMath::Max(1, FMath::RoundToInt32(BoundsArea * RustReferenceFoodDensity));
+
+	for (int32 FoodIndex = 0; FoodIndex < FoodCount; ++FoodIndex)
 	{
 		const int32 FoodX = RandomStream.RandRange(-HalfX, HalfX - 1);
 		const int32 FoodY = RandomStream.RandRange(-HalfY, HalfY - 1);

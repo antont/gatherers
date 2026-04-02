@@ -13,8 +13,8 @@ FString BuildModeLabel(EGatherersTimeControlMode Mode)
 {
 	switch (Mode)
 	{
-	case EGatherersTimeControlMode::Max:
-		return TEXT("Max (200x)");
+	case EGatherersTimeControlMode::Fastest:
+		return TEXT("Fastest (100x)");
 
 	case EGatherersTimeControlMode::VeryFast:
 		return TEXT("Very Fast (27x)");

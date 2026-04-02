@@ -58,5 +58,5 @@ void AGatherersPlayerController::SetupInputComponent()
 	BindSpeedKey(EKeys::One, EGatherersTimeControlMode::Normal);
 	BindSpeedKey(EKeys::Two, EGatherersTimeControlMode::Fast);
 	BindSpeedKey(EKeys::Three, EGatherersTimeControlMode::VeryFast);
-	BindSpeedKey(EKeys::Zero, EGatherersTimeControlMode::Max);
+	BindSpeedKey(EKeys::Four, EGatherersTimeControlMode::Fastest);
 }

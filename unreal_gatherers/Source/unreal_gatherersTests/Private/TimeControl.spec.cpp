@@ -368,17 +368,17 @@ public:
 		Widget->TriggerToggleFromUI();
 
 		Test->TestEqual(
-			TEXT("a third UI toggle should switch the world time mode to max"),
+			TEXT("a third UI toggle should switch the world time mode to fastest"),
 			GameMode->GetTimeControlMode(),
-			EGatherersTimeControlMode::Max);
+			EGatherersTimeControlMode::Fastest);
 		Test->TestEqual(
-			TEXT("max mode should also leave world dilation at 1x because the simulation clock owns speed"),
+			TEXT("fastest mode should also leave world dilation at 1x because the simulation clock owns speed"),
 			World->GetWorldSettings()->GetEffectiveTimeDilation(),
 			1.0f);
 		Test->TestEqual(
-			TEXT("time-control widget should show the max dilation"),
+			TEXT("time-control widget should show the fastest dilation"),
 			Widget->GetCurrentModeLabel(),
-			FString(TEXT("Max (200x)")));
+			FString(TEXT("Fastest (100x)")));
 
 		Widget->TriggerToggleFromUI();
 
