@@ -343,7 +343,7 @@ TArray<FMassEntityHandle> UGatherersMassSubsystem::QueryLooseFoodEntitiesOverlap
 	return OverlappingFoodEntities;
 }
 
-TArray<FMassEntityHandle> UGatherersMassSubsystem::QueryLooseFoodEntitiesAlongSweep(
+TArray<FGatherersMassFoodEncounter> UGatherersMassSubsystem::QueryLooseFoodEncountersAlongSweep(
 	const FVector& SweepStart,
 	const FVector& SweepEnd,
 	float Radius) const
@@ -351,25 +351,30 @@ TArray<FMassEntityHandle> UGatherersMassSubsystem::QueryLooseFoodEntitiesAlongSw
 	const float QueryRadius = FMath::Max(0.0f, Radius);
 	if (SweepStart.Equals(SweepEnd))
 	{
-		return QueryLooseFoodEntitiesOverlappingSphere(SweepStart, QueryRadius);
+		TArray<FGatherersMassFoodEncounter> Encounters;
+		for (const FMassEntityHandle Entity : QueryLooseFoodEntitiesOverlappingSphere(SweepStart, QueryRadius))
+		{
+			Encounters.Add({ Entity, SweepStart });
+		}
+		return Encounters;
 	}
 
-	TArray<FMassEntityHandle> SweptFoodEntities;
+	TArray<FGatherersMassFoodEncounter> Encounters;
 	if (!HasManagedSimulation() || FoodRepresentationComponent == nullptr)
 	{
-		return SweptFoodEntities;
+		return Encounters;
 	}
 
 	UWorld* World = GetWorld();
 	if (World == nullptr)
 	{
-		return SweptFoodEntities;
+		return Encounters;
 	}
 
 	UMassEntitySubsystem* MassEntitySubsystem = World->GetSubsystem<UMassEntitySubsystem>();
 	if (MassEntitySubsystem == nullptr)
 	{
-		return SweptFoodEntities;
+		return Encounters;
 	}
 
 	TArray<FHitResult> SweepHits;
@@ -411,6 +416,7 @@ TArray<FMassEntityHandle> UGatherersMassSubsystem::QueryLooseFoodEntitiesAlongSw
 	struct FSweptLooseFoodHit
 	{
 		FMassEntityHandle Entity;
+		FVector EncounterPosition = FVector::ZeroVector;
 		int32 InstanceIndex = INDEX_NONE;
 		bool bStartsOverlapped = false;
 		float StartDistanceSquared = TNumericLimits<float>::Max();
@@ -443,6 +449,7 @@ TArray<FMassEntityHandle> UGatherersMassSubsystem::QueryLooseFoodEntitiesAlongSw
 
 		Hits.Add({
 			FoodEntity,
+			ClosestPoint,
 			InstanceIndex,
 			StartDistanceSquared <= FMath::Square(QueryRadius),
 			StartDistanceSquared,
@@ -472,10 +479,23 @@ TArray<FMassEntityHandle> UGatherersMassSubsystem::QueryLooseFoodEntitiesAlongSw
 
 	for (const FSweptLooseFoodHit& Hit : Hits)
 	{
-		SweptFoodEntities.Add(Hit.Entity);
+		Encounters.Add({ Hit.Entity, Hit.EncounterPosition });
 	}
 
-	return SweptFoodEntities;
+	return Encounters;
+}
+
+TArray<FMassEntityHandle> UGatherersMassSubsystem::QueryLooseFoodEntitiesAlongSweep(
+	const FVector& SweepStart,
+	const FVector& SweepEnd,
+	float Radius) const
+{
+	TArray<FMassEntityHandle> Entities;
+	for (const FGatherersMassFoodEncounter& Encounter : QueryLooseFoodEncountersAlongSweep(SweepStart, SweepEnd, Radius))
+	{
+		Entities.Add(Encounter.Entity);
+	}
+	return Entities;
 }
 
 void UGatherersMassSubsystem::RebuildVisualInstances(UMassEntitySubsystem& MassEntitySubsystem)

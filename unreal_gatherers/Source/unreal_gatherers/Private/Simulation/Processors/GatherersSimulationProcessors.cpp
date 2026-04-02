@@ -137,17 +137,22 @@ void UGatherersFoodInteractionProcessor::Execute(FMassEntityManager& EntityManag
 		for (int32 EntityIndex = 0; EntityIndex < ChunkContext.GetNumEntities(); ++EntityIndex)
 		{
 			FGatherersMassAntFragment& AntFragment = AntFragments[EntityIndex];
-			const TArray<FMassEntityHandle> NearbyFoodEntities = MassSubsystem.QueryLooseFoodEntitiesAlongSweep(
+			const TArray<FGatherersMassFoodEncounter> NearbyEncounters = MassSubsystem.QueryLooseFoodEncountersAlongSweep(
 				AntFragment.PreviousPosition,
 				AntFragment.Position,
 				GatherersMassPickupRadius);
-			const FMassEntityHandle NearbyFoodEntity = NearbyFoodEntities.IsEmpty() ? FMassEntityHandle() : NearbyFoodEntities[0];
+			const FGatherersMassFoodEncounter* FirstEncounter = NearbyEncounters.IsEmpty() ? nullptr : &NearbyEncounters[0];
 
 			FGatherersMassFoodFragment* NearbyFood = nullptr;
-			if (NearbyFoodEntity.IsSet() && EntityManager.IsEntityValid(NearbyFoodEntity))
+			if (FirstEncounter != nullptr && FirstEncounter->Entity.IsSet() && EntityManager.IsEntityValid(FirstEncounter->Entity))
 			{
-				FMassEntityView NearbyFoodView(EntityManager, NearbyFoodEntity);
+				FMassEntityView NearbyFoodView(EntityManager, FirstEncounter->Entity);
 				NearbyFood = &NearbyFoodView.GetFragmentData<FGatherersMassFoodFragment>();
+			}
+
+			if (NearbyFood != nullptr)
+			{
+				AntFragment.Position = FirstEncounter->EncounterPosition;
 			}
 
 			if (AntFragment.CarriedFoodEntity.IsValid() && NearbyFood != nullptr)
@@ -179,7 +184,7 @@ void UGatherersFoodInteractionProcessor::Execute(FMassEntityManager& EntityManag
 				if (NearbyFood != nullptr)
 				{
 					AntFragment.Direction = ConsumeAntTurnDirection(AntFragment);
-					AntFragment.CarriedFoodEntity = NearbyFoodEntity;
+					AntFragment.CarriedFoodEntity = FirstEncounter->Entity;
 					NearbyFood->bIsLoose = false;
 				}
 			}

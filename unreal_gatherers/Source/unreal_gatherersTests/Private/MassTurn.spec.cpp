@@ -59,7 +59,8 @@ bool FGatherersMassTurnAutomationTest::RunTest(const FString& Parameters)
 		FVector(1.0f, 0.0f, 0.0f),
 		RandomStream.FRandRange(-1.0f, 1.0f),
 		PI / 2.0f);
-	const FVector ExpectedLocationAfterSecondTick = FVector(10.0f, 0.0f, 0.0f) + ExpectedTurnDirection * 10.0f;
+	const FVector PickupEncounterPoint(8.0f, 0.0f, 0.0f);
+	const FVector ExpectedLocationAfterSecondTick = PickupEncounterPoint + ExpectedTurnDirection * 10.0f;
 
 	MassSubsystem->RunSimulationProcessorsForTesting(0.1f);
 	MassSubsystem->RunSimulationProcessorsForTesting(0.1f);

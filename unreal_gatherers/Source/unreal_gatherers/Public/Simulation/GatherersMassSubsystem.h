@@ -54,6 +54,12 @@ struct UNREAL_GATHERERS_API FGatherersMassFoodFragment : public FMassFragment
 	bool bIsLoose = true;
 };
 
+struct UNREAL_GATHERERS_API FGatherersMassFoodEncounter
+{
+	FMassEntityHandle Entity;
+	FVector EncounterPosition = FVector::ZeroVector;
+};
+
 UCLASS()
 class UNREAL_GATHERERS_API UGatherersMassSubsystem : public UTickableWorldSubsystem
 {
@@ -73,6 +79,7 @@ public:
 	void SetSimulationRateMultiplier(float NewSimulationRateMultiplier);
 	TArray<FMassEntityHandle> QueryLooseFoodEntitiesOverlappingSphere(const FVector& Center, float Radius) const;
 	TArray<FMassEntityHandle> QueryLooseFoodEntitiesAlongSweep(const FVector& SweepStart, const FVector& SweepEnd, float Radius) const;
+	TArray<FGatherersMassFoodEncounter> QueryLooseFoodEncountersAlongSweep(const FVector& SweepStart, const FVector& SweepEnd, float Radius) const;
 
 	int32 GetManagedAntCount() const;
 	int32 GetManagedFoodCount() const;
