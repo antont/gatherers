@@ -531,3 +531,9 @@ For this project, that combination is unusually useful:
 - Bevy provides the clean conceptual baseline
 - Unreal provides the richest engine-learning path
 - Zig provides the clearest mechanical contrast
+
+## Links
+
+- [Bevy](https://bevyengine.org/) — Rust game engine with a built-in ECS
+- [Unreal Mass Entity](https://dev.epicgames.com/documentation/en-us/unreal-engine/mass-entity-in-unreal-engine) — Unreal Engine's ECS framework for lightweight entities
+- [zflecs](https://github.com/flecs-hub/zflecs) — Zig bindings for the [flecs](https://www.flecs.dev/) ECS library
