@@ -216,3 +216,14 @@ cd unreal-rust && cargo test -p gatherers-bevy-mass -p unreal-api-derive -p unre
 **Why zero-copy chunks?** Fragment data lives in Mass Entity's chunk memory. `MassChunks<T>` stores pointers directly into this memory — no copies during `populate_resources`. The Bevy schedule runs while these pointers are valid (same frame, game thread only).
 
 **Why `Option<MassSpatialQueryFn>` in `MassFrameDispatchData`?** The callback is nullable — when running without food entities or in test scenarios, no spatial queries are needed. The Rust collision system gracefully handles `None` by clearing all encounters.
+
+## Roadmap: Multi-Threaded Execution
+
+The Bevy schedule currently uses `ExecutorKind::SingleThreaded`. This is a deliberate safety constraint, not a limitation of the architecture.
+
+**Why single-threaded for now?** `MassChunks<T>` holds raw pointers into C++ Mass Entity chunk memory. While accessing *different* `MassChunks<T>` types from parallel threads is safe (they point to different memory regions), the spatial query callback uses static C++ globals that are not thread-safe. Forcing single-threaded execution removes this class of bugs until the callback is hardened.
+
+**Path to multi-threaded:**
+1. Independent fragment types (e.g., predators, resources) with their own system chains would benefit from automatic parallelization — Bevy detects non-conflicting resource access and schedules those systems concurrently.
+2. The spatial query callback must either be made thread-safe or isolated in its own stage (currently already true — collision prepass is alone in stage 1).
+3. Tests with independent test fragment types should verify correct parallel execution and thread ID divergence before enabling `ExecutorKind::MultiThreaded`.
