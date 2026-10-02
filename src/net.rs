@@ -16,7 +16,7 @@ impl Plugin for BackendClientPlugin {
             .init_resource::<BackendSequence>()
             .init_resource::<BackendFoodSlots>()
             .add_message::<BackendSimEvent>()
-            .insert_non_send_resource(BackendConnectionState::default())
+            .insert_non_send(BackendConnectionState::default())
             .add_systems(
                 PostUpdate,
                 (
