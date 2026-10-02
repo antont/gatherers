@@ -47,7 +47,7 @@ ewebsock = "0.8.0"
 #]
 
 [dependencies.bevy]
-version = "0.18"
+version = "0.19"
 default-features = false
 features = [
   "bevy_winit",         # Windowing backend

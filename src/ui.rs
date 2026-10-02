@@ -40,7 +40,7 @@ pub fn setup_ui(mut commands: Commands) {
                 SpeedLabel,
                 Text::new("Speed: 5.0x"),
                 TextFont {
-                    font_size: 18.0,
+                    font_size: FontSize::Px(18.0),
                     ..default()
                 },
                 TextColor(Color::WHITE),
@@ -73,7 +73,7 @@ pub fn setup_ui(mut commands: Commands) {
             parent.spawn((
                 Text::new("Controls:"),
                 TextFont {
-                    font_size: 14.0,
+                    font_size: FontSize::Px(14.0),
                     ..default()
                 },
                 TextColor(Color::srgb(0.8, 0.8, 0.8)),
@@ -82,7 +82,7 @@ pub fn setup_ui(mut commands: Commands) {
             parent.spawn((
                 Text::new("[-/=] Decrease/Increase Speed"),
                 TextFont {
-                    font_size: 14.0,
+                    font_size: FontSize::Px(14.0),
                     ..default()
                 },
                 TextColor(Color::srgb(0.8, 0.8, 0.8)),
@@ -91,7 +91,7 @@ pub fn setup_ui(mut commands: Commands) {
             parent.spawn((
                 Text::new("[R] Reset to 1.0x"),
                 TextFont {
-                    font_size: 14.0,
+                    font_size: FontSize::Px(14.0),
                     ..default()
                 },
                 TextColor(Color::srgb(0.8, 0.8, 0.8)),
@@ -100,7 +100,7 @@ pub fn setup_ui(mut commands: Commands) {
             parent.spawn((
                 Text::new("[U] Max Safe Speed"),
                 TextFont {
-                    font_size: 14.0,
+                    font_size: FontSize::Px(14.0),
                     ..default()
                 },
                 TextColor(Color::srgb(0.8, 0.8, 0.8)),
